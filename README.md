@@ -5,11 +5,11 @@ Ingeniería de Software 2.
 
 ## Versión
 
-**Versión actual: 1.0**
+**Versión actual: 1.1**
 
-Esta primera versión corresponde al inicio del desarrollo del frontend.
-Actualmente se ha implementado la ventana principal de la aplicación y
-el menú principal.
+Esta versión corresponde a las primeras etapas del desarrollo del proyecto.
+Actualmente se ha implementado la estructura inicial del frontend y se ha
+comenzado el modelado del dominio del ajedrez.
 
 ---
 
@@ -21,7 +21,8 @@ un frontend y un backend.
 La aplicación permitirá crear o unirse a salas de ajedrez, jugar partidas,
 registrar movimientos y consultar partidas almacenadas.
 
-En esta versión 1.0 se ha comenzado únicamente el desarrollo del frontend.
+El sistema estará separado en frontend y backend y seguirá una arquitectura
+hexagonal adaptada al alcance del proyecto.
 
 ---
 
@@ -39,6 +40,17 @@ Actualmente están implementados:
 - Integración de JavaFX.
 
 Los botones todavía no tienen implementada su funcionalidad definitiva.
+
+### Dominio
+
+Se ha comenzado a implementar el modelo básico del ajedrez.
+
+Actualmente existen:
+
+- `Color`: representa el color de las piezas (`WHITE` o `BLACK`).
+- `Position`: representa una posición mediante fila y columna.
+- `Tile`: representa una casilla del tablero y permite almacenar una pieza.
+- `Piece`: clase abstracta base para representar las piezas de ajedrez.
 
 ---
 
@@ -66,3 +78,6 @@ Para comprobar las versiones instaladas:
 ```bash
 java --version
 mvn --version
+```
+
+
