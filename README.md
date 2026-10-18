@@ -1,4 +1,4 @@
-# Chess Software
+# Chess Core
 
 ## Delivery objective
 
@@ -67,6 +67,9 @@ The implemented system is currently a single Java module. The complete online ar
        +-------------------------------+
        | Database                      |
        +-------------------------------+
+
+       Current implementation:
+       [software.ulpgc.chess Java domain core]
 ```
 
 There is no HTTP, REST, WebSocket or other frontend-backend communication contract. The only current contract is the in-process Java API exposed by the domain classes, for example `Board.initial()`, `Board.pieces()` and `Square.at(String)`.
@@ -127,3 +130,12 @@ mvn compile
 
 There are no automated tests in the repository yet, and no manual UI or multiplayer checks can be performed because those layers have not been implemented.
 
+## Known limitations
+
+- `Square.at(String)` is still a placeholder and currently returns `a1` for every input.
+- The initial-position map is declared with all standard starting squares, but coordinate parsing must be completed before those keys can represent different squares correctly.
+- `Board.move(Square, Square)` currently returns the same board and does not move or validate a piece.
+- No legal chess rules are implemented: turns, captures, check, checkmate, castling, promotion and en passant are absent.
+- There is no user, room, game or move-history model.
+- There is no backend, frontend, database, network communication or concurrency handling.
+- There are no automated tests or runtime screenshots yet.
