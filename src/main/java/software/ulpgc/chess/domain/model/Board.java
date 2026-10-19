@@ -1,5 +1,6 @@
 package software.ulpgc.chess.domain.model;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -18,7 +19,25 @@ public final class Board {
     }
 
     public Board move(Square from, Square to) {
-        return this;
+        validateSquare(from);
+        validateSquare(to);
+        if (from.equals(to))
+            throw new IllegalArgumentException("Origin and destination must be different");
+        Piece piece = pieceAt(from);
+        if (piece == null)
+            throw new IllegalArgumentException("No piece at origin");
+        Piece target = pieceAt(to);
+        if (target != null && target.color() == piece.color())
+            throw new IllegalArgumentException("Cannot capture a piece of the same color");
+        Map<Square, Piece> movedPieces = new HashMap<>(pieces);
+        movedPieces.remove(from);
+        movedPieces.put(to, piece);
+        return new Board(movedPieces);
+    }
+
+    private static void validateSquare(Square square) {
+        if (square == null || square.file() == null || square.rank() == null)
+            throw new IllegalArgumentException("Move squares must have a file and rank");
     }
 
     private static Map<Square, Piece> initialMap() {

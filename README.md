@@ -52,7 +52,7 @@ chess-core/
 
 ### Main classes
 
-- `Board`: stores a map of `Square` to `Piece`, exposes an initial-board factory and a board read-only view through `Map.copyOf`.
+- `Board`: stores a map of `Square` to `Piece`, exposes an initial-board factory and a board read-only view through `Map.copyOf`. `move(from, to)` returns a new board, leaving the original unchanged, and supports capturing an opposing piece.
 - `Square`: record representing a file and rank pair. Its factories parse coordinates such as `a1` or accept numeric coordinates from 1 to 8, rejecting invalid input.
 - `File`: the eight board files, from `a` to `h`.
 - `Rank`: the eight board ranks, from `1` to `8`.
@@ -173,7 +173,7 @@ The temporary harness is not included in the repository, so those checks are not
 - Only FEN piece placement is loaded; the remaining fields and legal-position rules are not validated.
 - Coordinate validation is performed by `Square.at(...)`; the record constructor still permits null components.
 - `State`, `PositionDesearizaler` and `StateDeserializer` are placeholders.
-- `Board.move(Square, Square)` currently returns the same board and does not move or validate a piece.
+- `Board.move(Square, Square)` rejects null or incomplete coordinates, identical origin and destination, empty origins and destinations occupied by a piece of the same color. It does not yet validate piece movement patterns, paths or turns.
 - No legal chess rules are implemented: turns, captures, check, checkmate, castling, promotion and en passant are absent.
 - There is no user, room, game or move-history model.
 - There is no backend, frontend, database, network communication or concurrency handling.
@@ -181,7 +181,7 @@ The temporary harness is not included in the repository, so those checks are not
 
 ## Next steps
 
-1. Implement basic movement in `Board.move()` and define the subset of rules to validate.
+1. Extend basic movement with a documented subset of chess rules, such as piece movement patterns and blocked paths.
 2. Model users, rooms, games, moves and game state.
 3. Add file input/output for positions and move history, keeping file access in an adapter.
 4. Build a console demonstration for loading a board, making moves and saving the history.
