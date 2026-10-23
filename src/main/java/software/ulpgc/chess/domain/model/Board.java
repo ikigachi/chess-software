@@ -86,7 +86,7 @@ public final class Board {
         return pieceAt(at(square));
     }
 
-    private Piece pieceAt(Square square) {
+    Piece pieceAt(Square square) {
         return pieces.get(square);
     }
 

@@ -37,7 +37,9 @@ chess-core/
     │   ├── Board.java
     │   ├── Color.java
     │   ├── File.java
+    │   ├── Game.java
     │   ├── Main.java
+    │   ├── Move.java
     │   ├── Piece.java
     │   ├── Rank.java
     │   ├── Square.java
@@ -59,7 +61,9 @@ chess-core/
 - `Piece`: enum containing the twelve white and black chess pieces, with helpers for colour and piece type.
 - `Color`: the `White` and `Black` colours.
 - `Main`: placeholder class; no application startup flow has been implemented.
-- `State`: empty record reserved for future game-state data.
+- `Move`: immutable record containing origin and destination squares; null endpoints are rejected.
+- `State`: immutable record containing a board and the current turn. `initial()` starts with the standard board and White to move. `move(Move)` checks the piece color, delegates board movement and returns a new state with the opposite turn.
+- `Game`: immutable record containing a nonblank identifier, a `State` and an ordered move history. `initial(id)` starts a game with no moves. `move(Move)` delegates to `State` and returns a new game with the same identifier, the updated state and the move appended. The history is copied defensively with `List.copyOf`.
 - `BoardDeserializer`: port defining `Board deserialize(String value)`.
 - `FenBoardDeserializer`: adapter implementing the port to load piece placement from FEN text.
 - `PositionDesearizaler` and `StateDeserializer`: empty interfaces with no implemented behavior yet.
@@ -115,7 +119,7 @@ There is no backend server yet. The current structure begins the separation of d
 
 ```text
 software.ulpgc.chess
-├── domain.model   Board, Piece, Square, File, Rank, Color, State
+├── domain.model   Board, Piece, Square, File, Rank, Color, Move, State, Game
 ├── ports          BoardDeserializer and placeholder interfaces
 └── adapters       FenBoardDeserializer implements BoardDeserializer
 ```
@@ -128,17 +132,26 @@ No frontend module is included in this delivery. There are currently no UI compo
 
 ## Users, rooms, games and moves
 
-The requested online-game data model is not implemented yet:
+The game core is implemented; users, rooms and persistence are still pending:
 
 | Concept | Current status |
 | --- | --- |
 | User | Not implemented |
 | Room | Not implemented |
-| Game | Not implemented as a separate entity |
-| Move history | Not implemented |
+| Game | Identifier, current state and immutable move history |
+| Move history | Ordered origin/destination moves stored in memory |
 | Database persistence | Not implemented |
 
-The only implemented state is a `Board` containing a `Map<Square, Piece>`.
+`State` groups a `Board` and the current turn. `Move` represents an origin and destination. `Game` groups the current state and its move history. For example:
+
+```java
+Game initial = Game.initial("game-1");
+Game afterWhite = initial.move(new Move(Square.at("e2"), Square.at("e4")));
+Game afterBlack = afterWhite.move(new Move(Square.at("e7"), Square.at("e5")));
+int moveCount = afterBlack.moves().size(); // 2
+```
+
+Each operation returns a new game, preserving the previous board, turn and history. Failed moves do not add a history entry or change the previous game. History is stored in memory only: there is no JSON serialization or file storage yet. These classes belong to `software.ulpgc.chess.domain.model`.
 
 ## Connecting users
 
@@ -149,6 +162,8 @@ No user connection mechanism is available yet. Rooms, invitations, matchmaking a
 The `Board` stores a defensive immutable copy of its pieces using `Map.copyOf`. This fits the domain because board states can be treated as values and cannot be modified through the map returned by `pieces()`. It also provides a suitable basis for future move operations that return a new board state instead of mutating an existing one.
 
 Coordinate parsing belongs to `Square`, while FEN interpretation belongs to `FenBoardDeserializer`, keeping related responsibilities together. The `BoardDeserializer` interface allows callers to depend on a small contract and substitute another implementation. The domain remains independent of the input format.
+
+`Game` composes a `State` and a move history, delegating turn validation to `State` and board updates to `Board`. It does not duplicate those rules or depend on serialization and storage libraries.
 
 Development follows high cohesion, low coupling, SOLID, composition over inheritance, DRY, convention over configuration and YAGNI. Patterns are introduced when a concrete need justifies them, keeping the design proportional to the current scope.
 
@@ -172,17 +187,17 @@ The temporary harness is not included in the repository, so those checks are not
 
 - Only FEN piece placement is loaded; the remaining fields and legal-position rules are not validated.
 - Coordinate validation is performed by `Square.at(...)`; the record constructor still permits null components.
-- `State`, `PositionDesearizaler` and `StateDeserializer` are placeholders.
+- `PositionDesearizaler` and `StateDeserializer` are placeholders.
 - `Board.move(Square, Square)` rejects null or incomplete coordinates, identical origin and destination, empty origins and destinations occupied by a piece of the same color. It does not yet validate piece movement patterns, paths or turns.
-- No legal chess rules are implemented: turns, captures, check, checkmate, castling, promotion and en passant are absent.
-- There is no user, room, game or move-history model.
+- Turn ownership is checked by `State.move(Move)`; direct calls to `Board.move(...)` do not enforce turns. Basic captures are supported, but piece movement patterns, blocked paths, check, checkmate, castling, promotion and en passant are not implemented.
+- Users, rooms, game results and completion status are not implemented. Games and their move histories are held in memory only.
 - There is no backend, frontend, database, network communication or concurrency handling.
 - There are no automated tests or runtime screenshots yet.
 
 ## Next steps
 
 1. Extend basic movement with a documented subset of chess rules, such as piece movement patterns and blocked paths.
-2. Model users, rooms, games, moves and game state.
+2. Model users and rooms, associate players with games and add game completion status.
 3. Add file input/output for positions and move history, keeping file access in an adapter.
 4. Build a console demonstration for loading a board, making moves and saving the history.
 5. Add frontend/backend communication, shared rooms, persistent history and reproducible verification for the final project.
