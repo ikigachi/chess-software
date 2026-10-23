@@ -50,19 +50,15 @@ public class FenBoardDeserializer implements BoardDeserializer {
     }
 
     private Piece pieceIn(char symbol) {
-        return switch (symbol) {
-            case 'P' -> Piece.WhitePawn;
-            case 'R' -> Piece.WhiteRook;
-            case 'N' -> Piece.WhiteKnight;
-            case 'B' -> Piece.WhiteBishop;
-            case 'Q' -> Piece.WhiteQueen;
-            case 'K' -> Piece.WhiteKing;
-            case 'p' -> Piece.BlackPawn;
-            case 'r' -> Piece.BlackRook;
-            case 'n' -> Piece.BlackKnight;
-            case 'b' -> Piece.BlackBishop;
-            case 'q' -> Piece.BlackQueen;
-            case 'k' -> Piece.BlackKing;
+        boolean white = Character.isUpperCase(symbol);
+
+        return switch (Character.toLowerCase(symbol)) {
+            case 'p' -> white ? Piece.WhitePawn : Piece.BlackPawn;
+            case 'r' -> white ? Piece.WhiteRook : Piece.BlackRook;
+            case 'n' -> white ? Piece.WhiteKnight : Piece.BlackKnight;
+            case 'b' -> white ? Piece.WhiteBishop : Piece.BlackBishop;
+            case 'q' -> white ? Piece.WhiteQueen : Piece.BlackQueen;
+            case 'k' -> white ? Piece.WhiteKing : Piece.BlackKing;
             default -> throw new IllegalArgumentException("Invalid FEN piece: " + symbol);
         };
     }
