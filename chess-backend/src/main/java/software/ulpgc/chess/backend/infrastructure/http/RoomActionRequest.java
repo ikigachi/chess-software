@@ -1,0 +1,39 @@
+package software.ulpgc.chess.backend.infrastructure.http;
+
+import software.ulpgc.chess.application.domain.model.Move;
+import software.ulpgc.chess.application.domain.model.Square;
+
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+
+public record RoomActionRequest(String action, String name, String code, Move move) {
+    public RoomActionRequest {
+        if (action == null || !Set.of("create", "join", "move", "refresh", "leave").contains(action))
+            throw new IllegalArgumentException("Unknown action.");
+        if (action.equals("create") || action.equals("join")) name = normalizeName(name);
+        if (action.equals("join")) code = normalizeCode(code);
+        if (action.equals("move") && move == null)
+            throw new IllegalArgumentException("Move cannot be null");
+    }
+
+    public static RoomActionRequest from(Map<String, String> fields) {
+        String action = fields.getOrDefault("action", "");
+        Move move = "move".equals(action)
+                ? new Move(Square.at(fields.get("from")), Square.at(fields.get("to"))) : null;
+        return new RoomActionRequest(action, fields.get("name"), fields.get("code"), move);
+    }
+
+    private static String normalizeName(String name) {
+        if (name == null || name.isBlank() || name.strip().length() > 40)
+            throw new IllegalArgumentException("Enter a name between 1 and 40 characters.");
+        return name.strip();
+    }
+
+    private static String normalizeCode(String code) {
+        if (code == null || code.isBlank()) throw new IllegalArgumentException("Enter the room code.");
+        String normalized = code.strip().toUpperCase(Locale.ROOT);
+        if (normalized.length() > 30) throw new IllegalArgumentException("The room code is too long.");
+        return normalized;
+    }
+}

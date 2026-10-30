@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Regalia. A quiet place to share a game of chess.">
+  <title>Regalia — A higher game</title>
+  <link rel="icon" href="/assets/crown.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+<div class="salon">
+  <aside class="sidebar" aria-label="Main navigation">
+    <a class="brand" href="/" aria-label="Regalia, home"><img src="/assets/crown.svg" alt="" width="47" height="43"><span>REGALIA</span><small>A HIGHER GAME</small></a>
+    <nav class="navigation">
+      <a class="nav-item active" href="/" aria-current="page"><span class="nav-icon">♞</span><span>Play</span><i>01</i></a>
+      <label class="nav-item" for="tab-room"><span class="nav-icon rooms-icon">◇</span><span>My room</span><i>02</i></label>
+      <label class="nav-item" for="tab-guide"><span class="nav-icon">♧</span><span>How to play</span><i>03</i></label>
+    </nav>
+    <div class="sidebar-art"><img src="/assets/marble-bust.png" alt="Classical white marble bust" width="1024" height="1536"><div class="art-fade"></div></div>
+    <div class="sidebar-quote"><span>DISCIPLINE<br>CREATES<br>FREEDOM.</span><b></b><small>ONE MOVE. ENDLESS POSSIBILITIES.</small></div>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <div class="heading"><span class="mode-mark">♔</span><div><h1>A game, without haste.</h1><p>Classical chess <span>·</span> Untimed</p></div></div>
+      <p class="top-motto">GOOD MOVES.<br>BRIGHTER DAYS.</p>
+      <span class="local-badge"><span></span> Local lounge</span>
+    </header>
+    <main class="game-layout" id="game">
+      <section class="board-column" aria-label="Chessboard">
+        <div id="top-player"></div>
+        <div class="board-surround"><div class="rank-labels" aria-hidden="true"><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span></div>
+          <div class="chessboard" id="board" aria-label="Select a piece and its destination" aria-busy="true"></div>
+          <div class="file-labels" aria-hidden="true"><span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span></div>
+        </div>
+        <div id="bottom-player"></div>
+        <div class="board-caption"><span class="caption-mark">✧</span><span id="board-hint">Loading the board…</span><span class="caption-end">REGALIA / EST. 2026</span></div>
+      </section>
+      <aside class="game-panel" aria-label="Game information">
+        <input class="tab-input" type="radio" name="panel" id="tab-moves" checked>
+        <input class="tab-input" type="radio" name="panel" id="tab-room">
+        <input class="tab-input" type="radio" name="panel" id="tab-guide">
+        <div class="panel-tabs"><label for="tab-moves">Moves</label><label for="tab-room">Room</label><label for="tab-guide">Guide</label></div>
+        <section class="tab-content moves-panel"><div class="panel-title"><div><small>THE ENCOUNTER</small><h2>Classical game</h2><p id="room-subtitle">One board. Endless possibilities.</p></div><span class="small-crown">♔</span></div>
+          <div class="move-table"><div class="table-heading"><span>No.</span><span>White</span><span>Black</span></div><div id="history-rows"></div><div class="empty-history" id="empty-history"><span aria-hidden="true">♙</span><h3>Everything is still to play for.</h3><p>Your moves will appear here, one by one.</p></div></div>
+          <div class="insight"><span>♧</span><p id="insight">Chess begins with an invitation. Create a room and share a moment of calm.</p></div>
+          <div class="panel-bottom"><span class="live-dot"></span><span id="game-status">Connecting…</span><button id="refresh-game" class="icon-button" type="button" aria-label="Refresh game" title="Refresh game" disabled>↻</button></div>
+        </section>
+        <section class="tab-content room-panel"><div class="panel-title"><div><small>A PLACE FOR TWO</small><h2>Share the game</h2><p>One room. Two sides of the board.</p></div></div><div class="room-code-card" id="room-info" hidden><small>YOUR ROOM CODE</small><strong id="room-code-display"></strong><p id="room-description"></p></div><div class="leave-form" id="leave-area" hidden><button class="text-button" type="button" id="leave-room">Stop viewing this room</button></div>
+          <form class="room-form" id="room-form"><label for="player-name">Your name</label><input id="player-name" name="name" maxlength="40" placeholder="What is your name?" value="" required><button class="button gold" name="action" value="create" disabled>Create a room <span>↗</span></button><div class="form-divider"><span>or join with a code</span></div><label for="room-code">Room code</label><input id="room-code" name="code" maxlength="30" placeholder="e.g. A1B2C3" autocomplete="off"><button class="button outline" name="action" value="join" disabled>Join a room <span>→</span></button></form><p class="room-footnote">For a second player, open a private window or a different browser.</p>
+        </section>
+        <section class="tab-content guide-panel"><div class="panel-title"><div><small>BEFORE YOU BEGIN</small><h2>Every move matters.</h2><p>The essentials for enjoying the lounge.</p></div></div><ol class="guide-steps"><li><span>01</span><div><h3>Make it yours</h3><p>Enter your name and create a room. You will play White.</p></div></li><li><span>02</span><div><h3>Invite a friend</h3><p>Share the code. The second player takes Black.</p></div></li><li><span>03</span><div><h3>Select and move</h3><p>Click your piece, then its destination. Players and moves update automatically.</p></div></li></ol><div class="rules-note"><strong>A work in progress</strong><p>Piece movements, blocked paths and turns are checked. King safety, castling, promotion and en passant are not implemented. Rooms remain available while the backend is running.</p></div></section>
+      </aside>
+      <div class="notice" id="notice" role="status" aria-live="polite">Loading the lounge…</div><noscript><p class="notice error">Enable JavaScript to display the board and play. Game rules remain on the Java backend.</p></noscript>
+    </main>
+    <footer class="page-footer"><span>MADE FOR THOUGHT. DESIGNED FOR ENJOYMENT.</span><span>Java · HTML · CSS · JavaScript</span></footer>
+  </div>
+</div>
+
+<template id="player-template">
+  <div class="player">
+    <div class="avatar" aria-hidden="true"></div>
+    <div><div class="player-name"><span data-player-name></span><span class="you-tag" hidden>You</span></div><div class="player-meta"><span data-player-color></span><span class="dot"></span><span data-player-description></span></div></div>
+    <span class="player-status"></span>
+  </div>
+</template>
+<template id="square-template">
+  <button class="square" type="button" aria-pressed="false"><img class="piece" alt="" aria-hidden="true"></button>
+</template>
+<template id="move-template">
+  <div class="move-row"><span data-move-number></span><span data-white-move></span><span data-black-move></span></div>
+</template>
+</body>
+</html>

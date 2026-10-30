@@ -29,15 +29,31 @@ public final class Board {
         Piece target = pieceAt(to);
         if (target != null && target.color() == piece.color())
             throw new IllegalArgumentException("Cannot capture a piece of the same color");
+        if (!piece.canMove(from, to, target != null))
+            throw new IllegalArgumentException("Invalid movement for this piece");
+        if (!piece.isKnight() && !pathIsClear(from, to))
+            throw new IllegalArgumentException("A piece blocks the path");
         Map<Square, Piece> movedPieces = new HashMap<>(pieces);
         movedPieces.remove(from);
         movedPieces.put(to, piece);
         return new Board(movedPieces);
     }
 
+    private boolean pathIsClear(Square from, Square to) {
+        int fileDifference = to.file().symbol() - from.file().symbol();
+        int rankDifference = to.rank().symbol() - from.rank().symbol();
+        int distance = Math.max(Math.abs(fileDifference), Math.abs(rankDifference));
+        for (int step = 1; step < distance; step++) {
+            Square square = Square.at(from.file().symbol() - 'a' + 1 + step * Integer.signum(fileDifference),
+                    from.rank().symbol() + step * Integer.signum(rankDifference));
+            if (pieceAt(square) != null) return false;
+        }
+        return true;
+    }
+
     private static void validateSquare(Square square) {
-        if (square == null || square.file() == null || square.rank() == null)
-            throw new IllegalArgumentException("Move squares must have a file and rank");
+        if (square == null)
+            throw new IllegalArgumentException("Move squares cannot be null");
     }
 
     private static Map<Square, Piece> initialMap() {

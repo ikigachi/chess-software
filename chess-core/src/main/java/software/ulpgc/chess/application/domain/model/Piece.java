@@ -17,8 +17,31 @@ public enum Piece {
     BlackKing,
     BlackQueen;
 
-    Color color() {
+    public Color color() {
         return isWhite() ? White : Black;
+    }
+
+    boolean canMove(Square from, Square to, boolean capture) {
+        int fileDistance = Math.abs(to.file().symbol() - from.file().symbol());
+        int rankDifference = to.rank().symbol() - from.rank().symbol();
+        int rankDistance = Math.abs(rankDifference);
+        if (fileDistance == 0 && rankDistance == 0) return false;
+        return switch (this) {
+            case WhitePawn, BlackPawn -> pawnCanMove(from, fileDistance, rankDifference, capture);
+            case WhiteRook, BlackRook -> fileDistance == 0 || rankDistance == 0;
+            case WhiteBishop, BlackBishop -> fileDistance == rankDistance;
+            case WhiteQueen, BlackQueen -> fileDistance == 0 || rankDistance == 0 || fileDistance == rankDistance;
+            case WhiteKnight, BlackKnight -> fileDistance == 1 && rankDistance == 2 || fileDistance == 2 && rankDistance == 1;
+            case WhiteKing, BlackKing -> Math.max(fileDistance, rankDistance) == 1;
+        };
+    }
+
+    private boolean pawnCanMove(Square from, int fileDistance, int rankDifference, boolean capture) {
+        int direction = color() == White ? 1 : -1;
+        if (capture) return fileDistance == 1 && rankDifference == direction;
+        int initialRank = color() == White ? 2 : 7;
+        return fileDistance == 0 && (rankDifference == direction
+                || from.rank().symbol() == initialRank && rankDifference == 2 * direction);
     }
 
     boolean isPawn() {

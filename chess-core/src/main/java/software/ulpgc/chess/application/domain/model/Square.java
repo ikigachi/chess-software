@@ -4,6 +4,15 @@ import java.util.Arrays;
 
 public record Square(File file, Rank rank) {
 
+    public Square {
+        if (file == null || rank == null)
+            throw new IllegalArgumentException("Square must have a file and rank");
+    }
+
+    public String coordinate() {
+        return "" + file.symbol() + rank.symbol();
+    }
+
     public static Square at(String value) {
         if (value == null || value.length() != 2)
             throw new IllegalArgumentException("Invalid square: " + value);

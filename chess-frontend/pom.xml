@@ -12,11 +12,4 @@
 
     <artifactId>chess-frontend</artifactId>
 
-    <dependencies>
-        <dependency>
-            <groupId>software.ulpgc</groupId>
-            <artifactId>chess-core</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-    </dependencies>
 </project>
