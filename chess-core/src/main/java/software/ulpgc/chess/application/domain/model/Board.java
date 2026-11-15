@@ -29,14 +29,38 @@ public final class Board {
         Piece target = pieceAt(to);
         if (target != null && target.color() == piece.color())
             throw new IllegalArgumentException("Cannot capture a piece of the same color");
+        if (target != null && target.isKing())
+            throw new IllegalArgumentException("The king cannot be captured.");
         if (!piece.canMove(from, to, target != null))
             throw new IllegalArgumentException("Invalid movement for this piece");
-        if (!piece.isKnight() && !pathIsClear(from, to))
+        if (!hasClearPath(piece, from, to))
             throw new IllegalArgumentException("A piece blocks the path");
         Map<Square, Piece> movedPieces = new HashMap<>(pieces);
         movedPieces.remove(from);
         movedPieces.put(to, piece);
         return new Board(movedPieces);
+    }
+
+    boolean isInCheck(Color color) {
+        Piece king = color == Color.White ? WhiteKing : BlackKing;
+        for (var entry : pieces.entrySet()) {
+            if (entry.getValue() == king) return isAttacked(entry.getKey(), color);
+        }
+        return false;
+    }
+
+    private boolean isAttacked(Square square, Color defendingColor) {
+        for (var entry : pieces.entrySet()) {
+            Piece piece = entry.getValue();
+            Square from = entry.getKey();
+            if (piece.color() != defendingColor && piece.canMove(from, square, true)
+                    && hasClearPath(piece, from, square)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasClearPath(Piece piece, Square from, Square to) {
+        return piece.isKnight() || pathIsClear(from, to);
     }
 
     private boolean pathIsClear(Square from, Square to) {

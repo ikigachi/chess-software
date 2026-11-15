@@ -58,6 +58,10 @@ class RoomHttpIntegrationTest {
         return data(get(client, "/api/state")).get("token").getAsString();
     }
 
+    private HttpResponse<String> move(HttpClient client, String token, String from, String to) throws Exception {
+        return post(client, Map.of("token", token, "action", "move", "from", from, "to", to));
+    }
+
     @Test void servesStaticMarkupJavascriptAndAllPieceAssets() throws Exception {
         var response = get(white, "/");
         assertEquals(200, response.statusCode());
@@ -137,6 +141,31 @@ class RoomHttpIntegrationTest {
         var left = data(post(white, Map.of("token", csrf, "action", "leave")));
         assertTrue(left.get("room").isJsonNull());
         assertNotNull(rooms.execute(created.getAsJsonObject("room").get("code").getAsString()));
+    }
+
+    @Test void rejectsIgnoringCheckWithoutChangingTheGameAndAcceptsBlockingIt() throws Exception {
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        var created = data(post(white, Map.of("token", whiteToken, "action", "create", "name", "Alice")));
+        String code = created.getAsJsonObject("room").get("code").getAsString();
+        assertEquals(200, post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", code)).statusCode());
+        assertEquals(200, move(white, whiteToken, "e2", "e4").statusCode());
+        assertEquals(200, move(black, blackToken, "e7", "e5").statusCode());
+        assertEquals(200, move(white, whiteToken, "f2", "f3").statusCode());
+        assertEquals(200, move(black, blackToken, "d8", "h4").statusCode());
+        Room inCheck = rooms.execute(code);
+
+        var rejected = move(white, whiteToken, "a2", "a3");
+        assertEquals(400, rejected.statusCode());
+        assertEquals("Your king would be in check.", data(rejected).get("message").getAsString());
+        assertSame(inCheck, rooms.execute(code));
+
+        var blocked = move(white, whiteToken, "g2", "g3");
+        assertEquals(200, blocked.statusCode());
+        var updated = data(get(black, "/api/state"));
+        assertEquals("Black", updated.getAsJsonObject("room").get("turn").getAsString());
+        assertEquals(5, updated.getAsJsonObject("room").getAsJsonArray("moves").size());
+        assertEquals("WhitePawn", updated.getAsJsonObject("pieces").get("g3").getAsString());
     }
 
     @Test void jsonSnapshotsPreserveUnicodeEscapingAndStructuredHistory() {
