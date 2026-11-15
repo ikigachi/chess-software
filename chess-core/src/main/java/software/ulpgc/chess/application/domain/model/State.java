@@ -15,6 +15,10 @@ public record State(Board board, Color turn) {
         return board.pieceAt(square);
     }
 
+    public boolean isCheckmate() {
+        return board.isInCheck(turn) && !board.hasLegalMove(turn);
+    }
+
     public State move(Move move) {
         if (move == null)
             throw new IllegalArgumentException("Move cannot be null");

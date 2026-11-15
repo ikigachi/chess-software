@@ -21,24 +21,51 @@ public final class Board {
     public Board move(Square from, Square to) {
         validateSquare(from);
         validateSquare(to);
+        String rejection = moveRejection(from, to);
+        if (rejection != null) throw new IllegalArgumentException(rejection);
+        return withPieceMoved(from, to);
+    }
+
+    private String moveRejection(Square from, Square to) {
         if (from.equals(to))
-            throw new IllegalArgumentException("Origin and destination must be different");
+            return "Origin and destination must be different";
         Piece piece = pieceAt(from);
         if (piece == null)
-            throw new IllegalArgumentException("No piece at origin");
+            return "No piece at origin";
         Piece target = pieceAt(to);
         if (target != null && target.color() == piece.color())
-            throw new IllegalArgumentException("Cannot capture a piece of the same color");
+            return "Cannot capture a piece of the same color";
         if (target != null && target.isKing())
-            throw new IllegalArgumentException("The king cannot be captured.");
+            return "The king cannot be captured.";
         if (!piece.canMove(from, to, target != null))
-            throw new IllegalArgumentException("Invalid movement for this piece");
+            return "Invalid movement for this piece";
         if (!hasClearPath(piece, from, to))
-            throw new IllegalArgumentException("A piece blocks the path");
+            return "A piece blocks the path";
+        return null;
+    }
+
+    private Board withPieceMoved(Square from, Square to) {
         Map<Square, Piece> movedPieces = new HashMap<>(pieces);
-        movedPieces.remove(from);
+        Piece piece = movedPieces.remove(from);
         movedPieces.put(to, piece);
         return new Board(movedPieces);
+    }
+
+    boolean hasLegalMove(Color color) {
+        for (var entry : pieces.entrySet()) {
+            if (entry.getValue().color() == color && hasLegalMoveFrom(entry.getKey(), color)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasLegalMoveFrom(Square from, Color color) {
+        for (File file : File.values()) {
+            for (Rank rank : Rank.values()) {
+                Square to = new Square(file, rank);
+                if (moveRejection(from, to) == null && !withPieceMoved(from, to).isInCheck(color)) return true;
+            }
+        }
+        return false;
     }
 
     boolean isInCheck(Color color) {
