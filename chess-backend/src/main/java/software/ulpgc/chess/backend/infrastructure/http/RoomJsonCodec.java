@@ -27,7 +27,7 @@ public final class RoomJsonCodec {
         if (room == null) return null;
         Game game = room.game();
         State state = game.state();
-        return new RoomView(room.code(), state.turn().name(), state.winner().map(Color::name).orElse(null),
+        return new RoomView(room.code(), state.turn().name(), state.isInCheck(), state.winner().map(Color::name).orElse(null),
                 state.isStalemate(), user(room.white()), user(room.black()), game.moves().stream().map(this::moveView).toList());
     }
 
@@ -42,8 +42,8 @@ public final class RoomJsonCodec {
 
     private record Snapshot(UserView viewer, RoomView room, Map<String, String> pieces, String token, String message) {}
     private record UserView(String id, String name) {}
-    private record RoomView(String code, String turn, String winner, boolean stalemate, UserView white, UserView black,
-                            List<MoveView> moves) {}
+    private record RoomView(String code, String turn, boolean inCheck, String winner, boolean stalemate,
+                            UserView white, UserView black, List<MoveView> moves) {}
     private record MoveView(String from, String to, String promotion) {}
     private record ErrorResponse(String message, String token) {}
 }

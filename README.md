@@ -99,7 +99,7 @@ The separation is currently lightweight: `app.js` constructs `RoomApi` directly.
 
 ## Communication contract
 
-The frontend uses `GET /api/state` to retrieve the game state and `POST /api/action` to create or join a room, move, refresh or leave. Requests use form fields. JSON responses contain the players, board, turn and history, or an error message. `room.winner` contains `White` or `Black` after checkmate and is otherwise `null`. `room.stalemate` is `true` after a draw by stalemate. A move can include a `promotion` choice of `queen`, `rook`, `bishop` or `knight`. Supplied choices appear in the move history. The server defaults to a queen when a pawn promotes without a choice.
+The frontend uses `GET /api/state` to retrieve the game state and `POST /api/action` to create or join a room, move, refresh or leave. Requests use form fields. JSON responses contain the players, board, turn and history, or an error message. `room.inCheck` indicates that the player to move is in check. `room.winner` contains `White` or `Black` after checkmate and is otherwise `null`. `room.stalemate` is `true` after a draw by stalemate. A move can include a `promotion` choice of `queen`, `rook`, `bishop` or `knight`. Supplied choices appear in the move history. The server defaults to a queen when a pawn promotes without a choice.
 
 ## Data model and connecting users
 
@@ -108,13 +108,13 @@ The frontend uses `GET /api/state` to retrieve the game state and `POST /api/act
 | `User` | Identifier and name; no authenticated account |
 | `Room` | Shared code, White user, optional Black user and one game |
 | `Game` | Identifier, current `State` and immutable list of moves |
-| `State` | Board, current turn and optional en passant target |
+| `State` | Board, current turn, optional en passant target and castling rights |
 | `Board` | Immutable mapping from `Square` to `Piece` |
 | `Move` | Origin, destination and optional promotion choice |
 
 The creator receives a six-character room code and plays White. The second user enters that code and plays Black. A third player is rejected. For local testing, use a normal and a private browser window; tabs in one profile share the same session. Click a piece and then a destination. Players, turns and moves update automatically by requesting the current state every two seconds while viewing a room. Refresh remains available for an immediate check. Drag-and-drop movement is not implemented.
 
-The server rejects moves that leave the moving player's king in check or attempt to capture the opposing king. Both players see the result after checkmate or stalemate and can review the final position and move history. When a pawn reaches its last rank, the browser asks the player to choose a promotion piece. En passant is available on the immediate reply to an opposing pawn's double step. Castling is pending.
+The server rejects moves that leave the moving player's king in check or attempt to capture the opposing king. Both players see which king is in check and can review the final position and move history after checkmate or stalemate. When a pawn reaches its last rank, the browser asks the player to choose a promotion piece. En passant is available on the immediate reply to an opposing pawn's double step. To castle, select the king and move it two squares toward the rook. The server checks castling rights, the path and the king's safety.
 
 ## Incorporated idea
 
@@ -144,7 +144,7 @@ Run all automated checks from the repository root:
 mvn test
 ```
 
-The latest run passed 67 tests. Coverage includes two independent cookie sessions, JSON responses, joining and reopening, token validation, piece movement, turn enforcement, king safety, checkmate, stalemate, pawn promotion and en passant. Two browser sessions verified that both players see the same results, promotions and en passant captures, the history survives a page reload, and the board becomes read-only after checkmate or stalemate.
+The latest run passed 76 tests. Coverage includes two independent cookie sessions, JSON responses, joining and reopening, token validation, piece movement, turn enforcement, king safety, checkmate, stalemate, pawn promotion, en passant and castling. Two browser sessions verified that the same game state appears for both players, including promotions, en passant captures and castling. The history survives a page reload, and the board becomes read-only after checkmate or stalemate.
 
 The supplied captures show both users in room `84A4FF` and eight recorded moves, from `c2-c4` and `b8-c6` to `d1-a4` and `d7-d5`. They show the shared game state and in-memory history; persistent storage is still pending.
 

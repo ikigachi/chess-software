@@ -28,7 +28,8 @@ public final class Game {
         State replayed = State.initial();
         for (Move move : restored.moves) replayed = replayed.move(move);
         if (!replayed.board().equals(state.board()) || replayed.turn() != state.turn()
-                || state.enPassantTarget() != null && !state.enPassantTarget().equals(replayed.enPassantTarget()))
+                || state.enPassantTarget() != null && !state.enPassantTarget().equals(replayed.enPassantTarget())
+                || !state.castlingRights().isEmpty() && !state.castlingRights().equals(replayed.castlingRights()))
             throw new IllegalArgumentException("Game state does not match its move history");
         return replayed.equals(state) ? restored : new Game(id, replayed, restored.moves);
     }

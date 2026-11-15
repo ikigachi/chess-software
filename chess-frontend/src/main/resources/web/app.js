@@ -36,9 +36,10 @@ function gameFinished(room) {
   return Boolean(room?.winner || room?.stalemate);
 }
 
-function resultMessage(room) {
+function positionMessage(room) {
   if (room?.winner) return `${room.winner} wins by checkmate.`;
-  return room?.stalemate ? 'Draw by stalemate.' : '';
+  if (room?.stalemate) return 'Draw by stalemate.';
+  return room?.inCheck ? `${room.turn} is in check.` : '';
 }
 
 function showPanel(panel) {
@@ -161,7 +162,7 @@ function render() {
   renderBoard();
   renderHistory();
   find('#room-subtitle').textContent = room ? `Room ${room.code} · Friendly game` : 'One board. Endless possibilities.';
-  find('#game-status').textContent = resultMessage(room) ||
+  find('#game-status').textContent = positionMessage(room) ||
     (!room ? 'Board preview' : room.black ? `Turn: ${room.turn}` : 'Waiting for the second player');
   find('#insight').textContent = gameFinished(room) ? 'Review the moves and final position.'
     : !room ? 'Chess begins with an invitation. Create a room and share a moment of calm.'
@@ -186,7 +187,7 @@ async function perform(action, fields = {}) {
     render();
     if (action === 'create' || action === 'leave') showPanel('room');
     if (action === 'join') showPanel('moves');
-    notify(resultMessage(snapshot.room) || snapshot.message);
+    notify(positionMessage(snapshot.room) || snapshot.message);
   } catch (error) {
     notify(error.message, true);
     if (action === 'move') {
@@ -221,7 +222,7 @@ async function syncState() {
     selected = null;
     if (promotionDialog.open) promotionDialog.close();
     render();
-    notify(resultMessage(next.room) || (!next.room ? 'Your session has changed. Create or join a room.'
+    notify(positionMessage(next.room) || (!next.room ? 'Your session has changed. Create or join a room.'
       : opponentJoined ? 'Your opponent joined. White to move.' : `Game updated. ${next.room.turn} to move.`));
   } catch (error) {
     if (!busy && version === stateVersion) {

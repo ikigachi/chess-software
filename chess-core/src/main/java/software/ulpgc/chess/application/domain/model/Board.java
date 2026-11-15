@@ -36,6 +36,24 @@ public final class Board {
         return withPieceMoved(from, to, promotion, enPassantCapture);
     }
 
+    Board castle(Castling castling) {
+        Square kingFrom = castling.kingFrom();
+        Square rookFrom = castling.rookFrom();
+        Square kingThrough = castling.rookTo();
+        Color color = castling.color();
+        if (!pathIsClear(kingFrom, rookFrom))
+            throw new IllegalArgumentException("A piece blocks the castling path.");
+        if (isInCheck(color) || withPieceMoved(kingFrom, kingThrough, null, null).isInCheck(color))
+            throw new IllegalArgumentException("The king cannot castle out of or through check.");
+
+        Map<Square, Piece> movedPieces = new HashMap<>(pieces);
+        Piece king = movedPieces.remove(kingFrom);
+        Piece rook = movedPieces.remove(rookFrom);
+        movedPieces.put(castling.kingTo(), king);
+        movedPieces.put(castling.rookTo(), rook);
+        return new Board(movedPieces);
+    }
+
     private String moveRejection(Square from, Square to, boolean enPassant) {
         if (from.equals(to))
             return "Origin and destination must be different";

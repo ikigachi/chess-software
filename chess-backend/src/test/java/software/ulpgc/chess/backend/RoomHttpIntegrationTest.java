@@ -153,7 +153,12 @@ class RoomHttpIntegrationTest {
         assertEquals(200, move(white, whiteToken, "e2", "e4").statusCode());
         assertEquals(200, move(black, blackToken, "e7", "e5").statusCode());
         assertEquals(200, move(white, whiteToken, "f2", "f3").statusCode());
-        assertEquals(200, move(black, blackToken, "d8", "h4").statusCode());
+        var attack = move(black, blackToken, "d8", "h4");
+        assertEquals(200, attack.statusCode());
+        var attackedRoom = data(attack).getAsJsonObject("room");
+        assertTrue(attackedRoom.get("inCheck").getAsBoolean());
+        assertEquals("White", attackedRoom.get("turn").getAsString());
+        assertEquals(attackedRoom, data(get(white, "/api/state")).getAsJsonObject("room"));
         Room inCheck = rooms.execute(code);
 
         var rejected = move(white, whiteToken, "a2", "a3");
@@ -165,6 +170,7 @@ class RoomHttpIntegrationTest {
         assertEquals(200, blocked.statusCode());
         var updated = data(get(black, "/api/state"));
         assertEquals("Black", updated.getAsJsonObject("room").get("turn").getAsString());
+        assertFalse(updated.getAsJsonObject("room").get("inCheck").getAsBoolean());
         assertEquals(5, updated.getAsJsonObject("room").getAsJsonArray("moves").size());
         assertEquals("WhitePawn", updated.getAsJsonObject("pieces").get("g3").getAsString());
     }
@@ -284,6 +290,45 @@ class RoomHttpIntegrationTest {
         assertEquals(captured.getAsJsonObject("room"), opponent.getAsJsonObject("room"));
         assertEquals(5, opponent.getAsJsonObject("room").getAsJsonArray("moves").size());
         assertEquals("Black", opponent.getAsJsonObject("room").get("turn").getAsString());
+    }
+
+    @Test void castlingUpdatesBothPlayersAndPlayContinuesFromTheNewSquares() throws Exception {
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        var created = data(post(white, Map.of("token", whiteToken, "action", "create", "name", "Alice")));
+        String code = created.getAsJsonObject("room").get("code").getAsString();
+        assertEquals(200, post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", code)).statusCode());
+        assertEquals(200, move(white, whiteToken, "e2", "e4").statusCode());
+        assertEquals(200, move(black, blackToken, "e7", "e5").statusCode());
+        assertEquals(200, move(white, whiteToken, "g1", "f3").statusCode());
+        assertEquals(200, move(black, blackToken, "g8", "f6").statusCode());
+        assertEquals(200, move(white, whiteToken, "f1", "e2").statusCode());
+        assertEquals(200, move(black, blackToken, "f8", "e7").statusCode());
+
+        var response = move(white, whiteToken, "e1", "g1");
+        assertEquals(200, response.statusCode());
+        var castled = data(response);
+        var board = castled.getAsJsonObject("pieces");
+        assertEquals("WhiteKing", board.get("g1").getAsString());
+        assertEquals("WhiteRook", board.get("f1").getAsString());
+        assertFalse(board.has("e1"));
+        assertFalse(board.has("h1"));
+
+        var opponent = data(get(black, "/api/state"));
+        assertEquals(board, opponent.getAsJsonObject("pieces"));
+        assertEquals(castled.getAsJsonObject("room"), opponent.getAsJsonObject("room"));
+        assertEquals(7, opponent.getAsJsonObject("room").getAsJsonArray("moves").size());
+        assertEquals("Black", opponent.getAsJsonObject("room").get("turn").getAsString());
+
+        assertEquals(200, move(black, blackToken, "e8", "g8").statusCode());
+        assertEquals(200, move(white, whiteToken, "g1", "h1").statusCode());
+        assertEquals(200, move(black, blackToken, "d7", "d6").statusCode());
+        var rookMoved = move(white, whiteToken, "f1", "e1");
+        assertEquals(200, rookMoved.statusCode());
+        var latest = data(rookMoved);
+        assertEquals("WhiteKing", latest.getAsJsonObject("pieces").get("h1").getAsString());
+        assertEquals("WhiteRook", latest.getAsJsonObject("pieces").get("e1").getAsString());
+        assertEquals(11, latest.getAsJsonObject("room").getAsJsonArray("moves").size());
     }
 
     @Test void invalidActionsPreserveSessionAndRoom() throws Exception {
