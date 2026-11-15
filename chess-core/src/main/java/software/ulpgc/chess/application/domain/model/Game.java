@@ -27,9 +27,10 @@ public final class Game {
         Game restored = new Game(id, state, moves);
         State replayed = State.initial();
         for (Move move : restored.moves) replayed = replayed.move(move);
-        if (!replayed.equals(state))
+        if (!replayed.board().equals(state.board()) || replayed.turn() != state.turn()
+                || state.enPassantTarget() != null && !state.enPassantTarget().equals(replayed.enPassantTarget()))
             throw new IllegalArgumentException("Game state does not match its move history");
-        return restored;
+        return replayed.equals(state) ? restored : new Game(id, replayed, restored.moves);
     }
 
     public String id() { return id; }

@@ -19,20 +19,24 @@ public final class Board {
     }
 
     public Board move(Square from, Square to) {
-        return move(from, to, null);
-    }
-
-    Board move(Square from, Square to, Promotion promotion) {
         validateSquare(from);
         validateSquare(to);
-        String rejection = moveRejection(from, to);
+        return apply(new Move(from, to), null);
+    }
+
+    Board apply(Move move, Square enPassantTarget) {
+        Square from = move.from();
+        Square to = move.to();
+        Promotion promotion = move.promotion();
+        Square enPassantCapture = enPassantCapture(from, to, enPassantTarget);
+        String rejection = moveRejection(from, to, enPassantCapture != null);
         if (rejection != null) throw new IllegalArgumentException(rejection);
         if (promotion != null && !pieceAt(from).promotesOn(to.rank()))
             throw new IllegalArgumentException("Only a pawn reaching the last rank can promote.");
-        return withPieceMoved(from, to, promotion);
+        return withPieceMoved(from, to, promotion, enPassantCapture);
     }
 
-    private String moveRejection(Square from, Square to) {
+    private String moveRejection(Square from, Square to, boolean enPassant) {
         if (from.equals(to))
             return "Origin and destination must be different";
         Piece piece = pieceAt(from);
@@ -43,16 +47,24 @@ public final class Board {
             return "Cannot capture a piece of the same color";
         if (target != null && target.isKing())
             return "The king cannot be captured.";
-        if (!piece.canMove(from, to, target != null))
+        if (!piece.canMove(from, to, target != null || enPassant))
             return "Invalid movement for this piece";
         if (!hasClearPath(piece, from, to))
             return "A piece blocks the path";
         return null;
     }
 
-    private Board withPieceMoved(Square from, Square to, Promotion promotion) {
+    private Square enPassantCapture(Square from, Square to, Square target) {
+        if (!to.equals(target)) return null;
+        Piece pawn = pieceAt(from);
+        if (pawn == null || !pawn.isPawn() || !pawn.canMove(from, to, true)) return null;
+        return new Square(to.file(), from.rank());
+    }
+
+    private Board withPieceMoved(Square from, Square to, Promotion promotion, Square enPassantCapture) {
         Map<Square, Piece> movedPieces = new HashMap<>(pieces);
         Piece piece = movedPieces.remove(from);
+        if (enPassantCapture != null) movedPieces.remove(enPassantCapture);
         if (piece.promotesOn(to.rank())) {
             Promotion choice = promotion == null ? Promotion.Queen : promotion;
             piece = choice.pieceOf(piece.color());
@@ -61,18 +73,20 @@ public final class Board {
         return new Board(movedPieces);
     }
 
-    boolean hasLegalMove(Color color) {
+    boolean hasLegalMove(Color color, Square enPassantTarget) {
         for (var entry : pieces.entrySet()) {
-            if (entry.getValue().color() == color && hasLegalMoveFrom(entry.getKey(), color)) return true;
+            if (entry.getValue().color() == color && hasLegalMoveFrom(entry.getKey(), color, enPassantTarget)) return true;
         }
         return false;
     }
 
-    private boolean hasLegalMoveFrom(Square from, Color color) {
+    private boolean hasLegalMoveFrom(Square from, Color color, Square enPassantTarget) {
         for (File file : File.values()) {
             for (Rank rank : Rank.values()) {
                 Square to = new Square(file, rank);
-                if (moveRejection(from, to) == null && !withPieceMoved(from, to, null).isInCheck(color))
+                Square enPassantCapture = enPassantCapture(from, to, enPassantTarget);
+                if (moveRejection(from, to, enPassantCapture != null) == null
+                        && !withPieceMoved(from, to, null, enPassantCapture).isInCheck(color))
                     return true;
             }
         }
