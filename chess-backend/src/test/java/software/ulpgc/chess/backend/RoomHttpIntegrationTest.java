@@ -11,6 +11,7 @@ import software.ulpgc.chess.backend.infrastructure.http.*;
 
 import java.net.*;
 import java.net.http.*;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -199,9 +200,35 @@ class RoomHttpIntegrationTest {
         assertEquals(200, checkmate.statusCode());
         var finalRoom = data(checkmate).getAsJsonObject("room");
         assertEquals("Black", finalRoom.get("winner").getAsString());
+        assertFalse(finalRoom.get("stalemate").getAsBoolean());
         assertEquals(4, finalRoom.getAsJsonArray("moves").size());
         assertEquals(400, move(white, whiteToken, "a2", "a3").statusCode());
         assertEquals(finalRoom, data(get(white, "/api/state")).getAsJsonObject("room"));
+    }
+
+    @Test void bothPlayersReceiveStalemateWithoutAWinner() throws Exception {
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        var created = data(post(white, Map.of("token", whiteToken, "action", "create", "name", "Alice")));
+        String code = created.getAsJsonObject("room").get("code").getAsString();
+        assertEquals(200, post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", code)).statusCode());
+        var moves = List.of("e2e3", "a7a5", "d1h5", "a8a6", "h5a5", "h7h5", "a5c7", "a6h6", "h2h4", "f7f6",
+                "c7d7", "e8f7", "d7b7", "d8d3", "b7b8", "d3h7", "b8c8", "f7g6", "c8e6");
+        for (int index = 0; index < moves.size(); index++) {
+            String squares = moves.get(index);
+            boolean whiteTurn = index % 2 == 0;
+            var response = move(whiteTurn ? white : black, whiteTurn ? whiteToken : blackToken,
+                    squares.substring(0, 2), squares.substring(2));
+            assertEquals(200, response.statusCode(), squares);
+            var room = data(response).getAsJsonObject("room");
+            assertEquals(index == moves.size() - 1, room.get("stalemate").getAsBoolean(), squares);
+            assertTrue(room.get("winner").isJsonNull(), squares);
+        }
+
+        var finalRoom = data(get(white, "/api/state")).getAsJsonObject("room");
+        assertEquals(moves.size(), finalRoom.getAsJsonArray("moves").size());
+        assertEquals(400, move(black, blackToken, "g6", "f5").statusCode());
+        assertEquals(finalRoom, data(get(black, "/api/state")).getAsJsonObject("room"));
     }
 
     @Test void invalidActionsPreserveSessionAndRoom() throws Exception {

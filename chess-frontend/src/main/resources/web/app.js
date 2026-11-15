@@ -27,11 +27,16 @@ function setBusy(value) {
 }
 
 function boardLocked() {
-  return busy || Boolean(snapshot?.room?.winner);
+  return busy || gameFinished(snapshot?.room);
 }
 
-function checkmateMessage(room) {
-  return room?.winner ? `${room.winner} wins by checkmate.` : '';
+function gameFinished(room) {
+  return Boolean(room?.winner || room?.stalemate);
+}
+
+function resultMessage(room) {
+  if (room?.winner) return `${room.winner} wins by checkmate.`;
+  return room?.stalemate ? 'Draw by stalemate.' : '';
 }
 
 function showPanel(panel) {
@@ -47,7 +52,8 @@ function renderPlayer(target, player, color) {
   const isWhite = color === 'White';
   const name = player?.name || (isWhite ? 'White' : 'Waiting for opponent');
   const isMe = player?.id === snapshot.viewer.id;
-  const isTurn = Boolean(snapshot.room?.black && !snapshot.room.winner && snapshot.room.turn === color);
+  const room = snapshot.room;
+  const isTurn = Boolean(room?.black && !gameFinished(room) && room.turn === color);
   element.classList.add(isWhite ? 'bottom' : 'top');
   const avatar = element.querySelector('.avatar');
   avatar.textContent = player ? [...name][0].toUpperCase() : '+';
@@ -66,6 +72,8 @@ function renderPlayer(target, player, color) {
 function renderBoard() {
   const room = snapshot.room;
   const last = room?.moves.at(-1);
+  const finished = gameFinished(room);
+  const locked = boardLocked();
   const squares = document.createDocumentFragment();
   for (let rank = 8; rank >= 1; rank--) {
     for (let file = 0; file < 8; file++) {
@@ -85,13 +93,13 @@ function renderBoard() {
         image.src = `/assets/pieces/${pieceColor(piece).toLowerCase()}-${type}.svg`;
         image.classList.add(pieceColor(piece) === 'White' ? 'ivory' : 'bronze');
       } else image.remove();
-      button.disabled = boardLocked();
+      button.disabled = locked;
       squares.append(button);
     }
   }
   board.replaceChildren(squares);
-  board.setAttribute('aria-label', room?.winner ? 'Final chess position' : 'Select a piece and its destination');
-  find('#board-hint').textContent = room?.winner ? 'Game over.'
+  board.setAttribute('aria-label', finished ? 'Final chess position' : 'Select a piece and its destination');
+  find('#board-hint').textContent = finished ? 'Game over.'
     : selected ? `Selected piece: ${selected}. Choose a destination square.`
       : !room ? 'Your next great move starts here.'
         : room.black ? 'Select a piece, then its destination.' : 'Share your room code to get started.';
@@ -122,9 +130,9 @@ function render() {
   renderBoard();
   renderHistory();
   find('#room-subtitle').textContent = room ? `Room ${room.code} · Friendly game` : 'One board. Endless possibilities.';
-  find('#game-status').textContent = checkmateMessage(room) ||
+  find('#game-status').textContent = resultMessage(room) ||
     (!room ? 'Board preview' : room.black ? `Turn: ${room.turn}` : 'Waiting for the second player');
-  find('#insight').textContent = room?.winner ? 'Review the moves and final position.'
+  find('#insight').textContent = gameFinished(room) ? 'Review the moves and final position.'
     : !room ? 'Chess begins with an invitation. Create a room and share a moment of calm.'
       : room.black ? 'Consider your next move. There is no clock: time is on your side.'
         : 'White is ready. Share your code and wait for your opponent to arrive.';
@@ -147,7 +155,7 @@ async function perform(action, fields = {}) {
     render();
     if (action === 'create' || action === 'leave') showPanel('room');
     if (action === 'join') showPanel('moves');
-    notify(checkmateMessage(snapshot.room) || snapshot.message);
+    notify(resultMessage(snapshot.room) || snapshot.message);
   } catch (error) {
     notify(error.message, true);
     if (action === 'move') {
@@ -181,7 +189,7 @@ async function syncState() {
     snapshot = next;
     selected = null;
     render();
-    notify(checkmateMessage(next.room) || (!next.room ? 'Your session has changed. Create or join a room.'
+    notify(resultMessage(next.room) || (!next.room ? 'Your session has changed. Create or join a room.'
       : opponentJoined ? 'Your opponent joined. White to move.' : `Game updated. ${next.room.turn} to move.`));
   } catch (error) {
     if (!busy && version === stateVersion) {
