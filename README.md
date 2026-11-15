@@ -99,7 +99,7 @@ The separation is currently lightweight: `app.js` constructs `RoomApi` directly.
 
 ## Communication contract
 
-The frontend sends HTTP requests to the backend: `GET /api/state` retrieves the game state, and `POST /api/action` submits actions to create or join a room, move, refresh or leave. Requests use form fields; responses use JSON with the players, board, turn and history, or an error message.
+The frontend sends HTTP requests to the backend: `GET /api/state` retrieves the game state, and `POST /api/action` submits actions to create or join a room, move, refresh or leave. Requests use form fields; responses use JSON with the players, board, turn and history, or an error message. The `room.winner` field is `null` until checkmate, when it contains `White` or `Black`.
 
 ## Data model and connecting users
 
@@ -114,7 +114,7 @@ The frontend sends HTTP requests to the backend: `GET /api/state` retrieves the 
 
 The creator receives a six-character room code and plays White. The second user enters that code and plays Black. A third player is rejected. For local testing, use a normal and a private browser window; tabs in one profile share the same session. Click a piece and then a destination. Players, turns and moves update automatically by requesting the current state every two seconds while viewing a room. Refresh remains available for an immediate check. Drag-and-drop movement is not implemented.
 
-The server rejects moves that leave the moving player's king in check or attempt to capture the opposing king. The chess core detects checkmate using the supported moves. Displaying the winner, stalemate, castling, promotion and en passant are pending.
+The server rejects moves that leave the moving player's king in check or attempt to capture the opposing king. When it detects checkmate, both players see the winner and can review the final position and move history. Stalemate, castling, promotion and en passant are pending.
 
 ## Incorporated idea
 
@@ -144,7 +144,7 @@ Run all automated checks from the repository root:
 mvn test
 ```
 
-The latest run passed 49 tests. Coverage includes two independent cookie sessions, JSON responses, joining and reopening, token validation, piece movement, turn enforcement, king safety and checkmate. An HTTP integration test verifies that ignoring check preserves the board, turn and history, and that blocking the check advances the game.
+The latest run passed 50 tests. Coverage includes two independent cookie sessions, JSON responses, joining and reopening, token validation, piece movement, turn enforcement, king safety and checkmate. Two browser sessions were also used to verify that both players see the same winner, that moves are disabled after checkmate, and that the final position and result are available after reloading.
 
 The supplied captures show both users in room `84A4FF` and eight recorded moves, from `c2-c4` and `b8-c6` to `d1-a4` and `d7-d5`. They show the shared game state and in-memory history; persistent storage is still pending.
 

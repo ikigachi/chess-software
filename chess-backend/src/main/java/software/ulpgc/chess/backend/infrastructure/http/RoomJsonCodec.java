@@ -16,6 +16,7 @@ public final class RoomJsonCodec {
         Map<String, String> pieces = new LinkedHashMap<>();
         board.pieces().forEach((square, piece) -> pieces.put(square.coordinate(), piece.name()));
         RoomView roomView = room == null ? null : new RoomView(room.code(), room.game().turn().name(),
+                room.game().state().winner().map(Color::name).orElse(null),
                 user(room.white()), user(room.black()), room.game().moves().stream()
                 .map(move -> new MoveView(move.from().coordinate(), move.to().coordinate())).toList());
         return gson.toJson(new Snapshot(user(viewer), roomView, pieces, token, message));
@@ -31,7 +32,7 @@ public final class RoomJsonCodec {
 
     private record Snapshot(UserView viewer, RoomView room, Map<String, String> pieces, String token, String message) {}
     private record UserView(String id, String name) {}
-    private record RoomView(String code, String turn, UserView white, UserView black, List<MoveView> moves) {}
+    private record RoomView(String code, String turn, String winner, UserView white, UserView black, List<MoveView> moves) {}
     private record MoveView(String from, String to) {}
     private record ErrorResponse(String message, String token) {}
 }

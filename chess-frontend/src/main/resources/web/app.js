@@ -21,7 +21,17 @@ function notify(message, error = false) {
 function setBusy(value) {
   busy = value;
   board.setAttribute('aria-busy', String(value));
-  document.querySelectorAll('button').forEach((button) => { button.disabled = value; });
+  document.querySelectorAll('button').forEach((button) => {
+    button.disabled = button.hasAttribute('data-square') ? boardLocked() : value;
+  });
+}
+
+function boardLocked() {
+  return busy || Boolean(snapshot?.room?.winner);
+}
+
+function checkmateMessage(room) {
+  return room?.winner ? `${room.winner} wins by checkmate.` : '';
 }
 
 function showPanel(panel) {
@@ -37,7 +47,7 @@ function renderPlayer(target, player, color) {
   const isWhite = color === 'White';
   const name = player?.name || (isWhite ? 'White' : 'Waiting for opponent');
   const isMe = player?.id === snapshot.viewer.id;
-  const isTurn = Boolean(snapshot.room?.black && snapshot.room.turn === color);
+  const isTurn = Boolean(snapshot.room?.black && !snapshot.room.winner && snapshot.room.turn === color);
   element.classList.add(isWhite ? 'bottom' : 'top');
   const avatar = element.querySelector('.avatar');
   avatar.textContent = player ? [...name][0].toUpperCase() : '+';
@@ -54,7 +64,8 @@ function renderPlayer(target, player, color) {
 }
 
 function renderBoard() {
-  const last = snapshot.room?.moves.at(-1);
+  const room = snapshot.room;
+  const last = room?.moves.at(-1);
   const squares = document.createDocumentFragment();
   for (let rank = 8; rank >= 1; rank--) {
     for (let file = 0; file < 8; file++) {
@@ -74,14 +85,16 @@ function renderBoard() {
         image.src = `/assets/pieces/${pieceColor(piece).toLowerCase()}-${type}.svg`;
         image.classList.add(pieceColor(piece) === 'White' ? 'ivory' : 'bronze');
       } else image.remove();
-      button.disabled = busy;
+      button.disabled = boardLocked();
       squares.append(button);
     }
   }
   board.replaceChildren(squares);
-  find('#board-hint').textContent = selected ? `Selected piece: ${selected}. Choose a destination square.`
-    : !snapshot.room ? 'Your next great move starts here.'
-      : snapshot.room.black ? 'Select a piece, then its destination.' : 'Share your room code to get started.';
+  board.setAttribute('aria-label', room?.winner ? 'Final chess position' : 'Select a piece and its destination');
+  find('#board-hint').textContent = room?.winner ? 'Game over.'
+    : selected ? `Selected piece: ${selected}. Choose a destination square.`
+      : !room ? 'Your next great move starts here.'
+        : room.black ? 'Select a piece, then its destination.' : 'Share your room code to get started.';
 }
 
 function renderHistory() {
@@ -109,10 +122,12 @@ function render() {
   renderBoard();
   renderHistory();
   find('#room-subtitle').textContent = room ? `Room ${room.code} · Friendly game` : 'One board. Endless possibilities.';
-  find('#game-status').textContent = !room ? 'Board preview' : room.black ? `Turn: ${room.turn}` : 'Waiting for the second player';
-  find('#insight').textContent = !room ? 'Chess begins with an invitation. Create a room and share a moment of calm.'
-    : room.black ? 'Consider your next move. There is no clock: time is on your side.'
-      : 'White is ready. Share your code and wait for your opponent to arrive.';
+  find('#game-status').textContent = checkmateMessage(room) ||
+    (!room ? 'Board preview' : room.black ? `Turn: ${room.turn}` : 'Waiting for the second player');
+  find('#insight').textContent = room?.winner ? 'Review the moves and final position.'
+    : !room ? 'Chess begins with an invitation. Create a room and share a moment of calm.'
+      : room.black ? 'Consider your next move. There is no clock: time is on your side.'
+        : 'White is ready. Share your code and wait for your opponent to arrive.';
   find('#room-info').hidden = !room;
   find('#leave-area').hidden = !room;
   find('#room-code-display').textContent = room?.code || '';
@@ -132,7 +147,7 @@ async function perform(action, fields = {}) {
     render();
     if (action === 'create' || action === 'leave') showPanel('room');
     if (action === 'join') showPanel('moves');
-    notify(snapshot.message);
+    notify(checkmateMessage(snapshot.room) || snapshot.message);
   } catch (error) {
     notify(error.message, true);
     if (action === 'move') {
@@ -166,8 +181,8 @@ async function syncState() {
     snapshot = next;
     selected = null;
     render();
-    notify(!next.room ? 'Your session has changed. Create or join a room.'
-      : opponentJoined ? 'Your opponent joined. White to move.' : `Game updated. ${next.room.turn} to move.`);
+    notify(checkmateMessage(next.room) || (!next.room ? 'Your session has changed. Create or join a room.'
+      : opponentJoined ? 'Your opponent joined. White to move.' : `Game updated. ${next.room.turn} to move.`));
   } catch (error) {
     if (!busy && version === stateVersion) {
       syncFailed = true;
@@ -178,7 +193,7 @@ async function syncState() {
 
 board.addEventListener('click', (event) => {
   const button = event.target.closest('[data-square]');
-  if (!button || busy || !snapshot) return;
+  if (!button || boardLocked() || !snapshot) return;
   const room = snapshot.room;
   if (!room) { showPanel('room'); notify('Create or join a room to get started.', true); return; }
   if (!room.black) { notify('Wait for the second player to join.', true); return; }

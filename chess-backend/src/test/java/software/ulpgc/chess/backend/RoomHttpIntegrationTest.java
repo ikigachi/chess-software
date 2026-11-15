@@ -183,6 +183,27 @@ class RoomHttpIntegrationTest {
         assertThrows(IllegalArgumentException.class, () -> FormData.decode("a=1&a=2"));
     }
 
+    @Test void bothPlayersReceiveTheWinnerAfterCheckmate() throws Exception {
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        var created = data(post(white, Map.of("token", whiteToken, "action", "create", "name", "Alice")));
+        String code = created.getAsJsonObject("room").get("code").getAsString();
+        assertEquals(200, post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", code)).statusCode());
+        assertEquals(200, move(white, whiteToken, "f2", "f3").statusCode());
+        assertEquals(200, move(black, blackToken, "e7", "e5").statusCode());
+        var beforeCheckmate = move(white, whiteToken, "g2", "g4");
+        assertEquals(200, beforeCheckmate.statusCode());
+        assertTrue(data(beforeCheckmate).getAsJsonObject("room").get("winner").isJsonNull());
+
+        var checkmate = move(black, blackToken, "d8", "h4");
+        assertEquals(200, checkmate.statusCode());
+        var finalRoom = data(checkmate).getAsJsonObject("room");
+        assertEquals("Black", finalRoom.get("winner").getAsString());
+        assertEquals(4, finalRoom.getAsJsonArray("moves").size());
+        assertEquals(400, move(white, whiteToken, "a2", "a3").statusCode());
+        assertEquals(finalRoom, data(get(white, "/api/state")).getAsJsonObject("room"));
+    }
+
     @Test void invalidActionsPreserveSessionAndRoom() throws Exception {
         String csrf = token(white);
         var created = data(post(white, Map.of("token", csrf, "action", "create", "name", "Alice")));
