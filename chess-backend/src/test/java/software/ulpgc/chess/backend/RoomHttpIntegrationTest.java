@@ -231,6 +231,35 @@ class RoomHttpIntegrationTest {
         assertEquals(finalRoom, data(get(black, "/api/state")).getAsJsonObject("room"));
     }
 
+    @Test void acceptsAPromotionChoiceAndReturnsItInBothPlayersHistory() throws Exception {
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        var created = data(post(white, Map.of("token", whiteToken, "action", "create", "name", "Alice")));
+        String code = created.getAsJsonObject("room").get("code").getAsString();
+        assertEquals(200, post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", code)).statusCode());
+        var moves = List.of("a2a4", "h7h5", "a4a5", "h5h4", "a5a6", "h4h3", "a6b7", "h3g2");
+        for (int index = 0; index < moves.size(); index++) {
+            String squares = moves.get(index);
+            boolean whiteTurn = index % 2 == 0;
+            assertEquals(200, move(whiteTurn ? white : black, whiteTurn ? whiteToken : blackToken,
+                    squares.substring(0, 2), squares.substring(2)).statusCode(), squares);
+        }
+        Room beforePromotion = rooms.execute(code);
+        var invalid = post(white, Map.of("token", whiteToken, "action", "move", "from", "b7", "to", "a8", "promotion", "king"));
+        assertEquals(400, invalid.statusCode());
+        assertSame(beforePromotion, rooms.execute(code));
+
+        var response = post(white, Map.of("token", whiteToken, "action", "move", "from", "b7", "to", "a8", "promotion", " Knight "));
+        assertEquals(200, response.statusCode());
+        var promoted = data(response);
+        var opponent = data(get(black, "/api/state"));
+        assertEquals("WhiteKnight", promoted.getAsJsonObject("pieces").get("a8").getAsString());
+        assertEquals(promoted.getAsJsonObject("pieces"), opponent.getAsJsonObject("pieces"));
+        var history = promoted.getAsJsonObject("room").getAsJsonArray("moves");
+        assertEquals("knight", history.get(history.size() - 1).getAsJsonObject().get("promotion").getAsString());
+        assertEquals(history, opponent.getAsJsonObject("room").getAsJsonArray("moves"));
+    }
+
     @Test void invalidActionsPreserveSessionAndRoom() throws Exception {
         String csrf = token(white);
         var created = data(post(white, Map.of("token", csrf, "action", "create", "name", "Alice")));

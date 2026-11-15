@@ -6,6 +6,7 @@ import software.ulpgc.chess.application.domain.model.*;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 public final class RoomJsonCodec {
@@ -27,8 +28,12 @@ public final class RoomJsonCodec {
         Game game = room.game();
         State state = game.state();
         return new RoomView(room.code(), state.turn().name(), state.winner().map(Color::name).orElse(null),
-                state.isStalemate(), user(room.white()), user(room.black()), game.moves().stream()
-                .map(move -> new MoveView(move.from().coordinate(), move.to().coordinate())).toList());
+                state.isStalemate(), user(room.white()), user(room.black()), game.moves().stream().map(this::moveView).toList());
+    }
+
+    private MoveView moveView(Move move) {
+        String promotion = move.promotion() == null ? null : move.promotion().name().toLowerCase(Locale.ROOT);
+        return new MoveView(move.from().coordinate(), move.to().coordinate(), promotion);
     }
 
     private UserView user(User user) {
@@ -39,6 +44,6 @@ public final class RoomJsonCodec {
     private record UserView(String id, String name) {}
     private record RoomView(String code, String turn, String winner, boolean stalemate, UserView white, UserView black,
                             List<MoveView> moves) {}
-    private record MoveView(String from, String to) {}
+    private record MoveView(String from, String to, String promotion) {}
     private record ErrorResponse(String message, String token) {}
 }

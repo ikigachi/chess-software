@@ -1,6 +1,7 @@
 package software.ulpgc.chess.backend.infrastructure.http;
 
 import software.ulpgc.chess.application.domain.model.Move;
+import software.ulpgc.chess.application.domain.model.Promotion;
 import software.ulpgc.chess.application.domain.model.Square;
 
 import java.util.Locale;
@@ -20,8 +21,19 @@ public record RoomActionRequest(String action, String name, String code, Move mo
     public static RoomActionRequest from(Map<String, String> fields) {
         String action = fields.getOrDefault("action", "");
         Move move = "move".equals(action)
-                ? new Move(Square.at(fields.get("from")), Square.at(fields.get("to"))) : null;
+                ? new Move(Square.at(fields.get("from")), Square.at(fields.get("to")), promotion(fields.get("promotion"))) : null;
         return new RoomActionRequest(action, fields.get("name"), fields.get("code"), move);
+    }
+
+    private static Promotion promotion(String value) {
+        if (value == null) return null;
+        return switch (value.strip().toLowerCase(Locale.ROOT)) {
+            case "queen" -> Promotion.Queen;
+            case "rook" -> Promotion.Rook;
+            case "bishop" -> Promotion.Bishop;
+            case "knight" -> Promotion.Knight;
+            default -> throw new IllegalArgumentException("Choose a queen, rook, bishop, or knight for promotion.");
+        };
     }
 
     private static String normalizeName(String name) {

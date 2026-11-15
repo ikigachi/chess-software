@@ -50,13 +50,26 @@
         <section class="tab-content room-panel"><div class="panel-title"><div><small>A PLACE FOR TWO</small><h2>Share the game</h2><p>One room. Two sides of the board.</p></div></div><div class="room-code-card" id="room-info" hidden><small>YOUR ROOM CODE</small><strong id="room-code-display"></strong><p id="room-description"></p></div><div class="leave-form" id="leave-area" hidden><button class="text-button" type="button" id="leave-room">Stop viewing this room</button></div>
           <form class="room-form" id="room-form"><label for="player-name">Your name</label><input id="player-name" name="name" maxlength="40" placeholder="What is your name?" value="" required><button class="button gold" name="action" value="create" disabled>Create a room <span>↗</span></button><div class="form-divider"><span>or join with a code</span></div><label for="room-code">Room code</label><input id="room-code" name="code" maxlength="30" placeholder="e.g. A1B2C3" autocomplete="off"><button class="button outline" name="action" value="join" disabled>Join a room <span>→</span></button></form><p class="room-footnote">For a second player, open a private window or a different browser.</p>
         </section>
-        <section class="tab-content guide-panel"><div class="panel-title"><div><small>BEFORE YOU BEGIN</small><h2>Every move matters.</h2><p>The essentials for enjoying the lounge.</p></div></div><ol class="guide-steps"><li><span>01</span><div><h3>Make it yours</h3><p>Enter your name and create a room. You will play White.</p></div></li><li><span>02</span><div><h3>Invite a friend</h3><p>Share the code. The second player takes Black.</p></div></li><li><span>03</span><div><h3>Select and move</h3><p>Click your piece, then its destination. Players and moves update automatically.</p></div></li></ol><div class="rules-note"><strong>A work in progress</strong><p>The server validates moves and reports checkmate and stalemate. Pawns promote to a queen automatically. Castling and en passant are pending. Rooms remain available while the backend is running.</p></div></section>
+        <section class="tab-content guide-panel"><div class="panel-title"><div><small>BEFORE YOU BEGIN</small><h2>Every move matters.</h2><p>The essentials for enjoying the lounge.</p></div></div><ol class="guide-steps"><li><span>01</span><div><h3>Make it yours</h3><p>Enter your name and create a room. You will play White.</p></div></li><li><span>02</span><div><h3>Invite a friend</h3><p>Share the code. The second player takes Black.</p></div></li><li><span>03</span><div><h3>Select and move</h3><p>Click your piece, then its destination. Players and moves update automatically.</p></div></li></ol><div class="rules-note"><strong>A work in progress</strong><p>The server validates moves and reports checkmate and stalemate. Choose a piece when your pawn reaches its last rank. Castling and en passant are pending. Rooms remain available while the backend is running.</p></div></section>
       </aside>
       <div class="notice" id="notice" role="status" aria-live="polite">Loading the lounge…</div><noscript><p class="notice error">Enable JavaScript to display the board and play. Game rules remain on the Java backend.</p></noscript>
     </main>
     <footer class="page-footer"><span>MADE FOR THOUGHT. DESIGNED FOR ENJOYMENT.</span><span>Java · HTML · CSS · JavaScript</span></footer>
   </div>
 </div>
+
+<dialog id="promotion-dialog" class="promotion-dialog" aria-labelledby="promotion-title">
+  <form method="dialog">
+    <h2 id="promotion-title">Promote your pawn</h2>
+    <div class="promotion-options">
+      <button class="button gold" type="submit" value="queen" autofocus>Queen</button>
+      <button class="button outline" type="submit" value="rook">Rook</button>
+      <button class="button outline" type="submit" value="bishop">Bishop</button>
+      <button class="button outline" type="submit" value="knight">Knight</button>
+    </div>
+    <button class="text-button" type="submit" value="">Cancel</button>
+  </form>
+</dialog>
 
 <template id="player-template">
   <div class="player">

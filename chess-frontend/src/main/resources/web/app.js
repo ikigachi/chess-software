@@ -5,6 +5,8 @@ const find = (selector) => document.querySelector(selector);
 const clone = (id) => find(id).content.firstElementChild.cloneNode(true);
 const board = find('#board');
 const roomForm = find('#room-form');
+const promotionDialog = find('#promotion-dialog');
+const promotionLetters = { queen: 'Q', rook: 'R', bishop: 'B', knight: 'N' };
 let snapshot;
 let selected = null;
 let busy = true;
@@ -45,6 +47,34 @@ function showPanel(panel) {
 
 function pieceColor(piece) {
   return piece?.startsWith('White') ? 'White' : 'Black';
+}
+
+function needsPromotion(from, to) {
+  const pawn = snapshot.pieces.get(from);
+  const fileDistance = Math.abs(from.charCodeAt(0) - to.charCodeAt(0));
+  if (fileDistance !== (snapshot.pieces.has(to) ? 1 : 0)) return false;
+  return (pawn === 'WhitePawn' && from[1] === '7' && to[1] === '8') ||
+    (pawn === 'BlackPawn' && from[1] === '2' && to[1] === '1');
+}
+
+function choosePromotion() {
+  promotionDialog.returnValue = '';
+  const choice = new Promise((resolve) => {
+    promotionDialog.addEventListener('close', () => resolve(promotionDialog.returnValue), { once: true });
+  });
+  promotionDialog.showModal();
+  return choice;
+}
+
+async function submitMove(from, to) {
+  const fields = { from, to };
+  if (needsPromotion(from, to)) {
+    const current = snapshot;
+    const promotion = await choosePromotion();
+    if (!promotion || snapshot !== current) return;
+    fields.promotion = promotion;
+  }
+  await perform('move', fields);
 }
 
 function renderPlayer(target, player, color) {
@@ -114,7 +144,8 @@ function renderHistory() {
     for (const [offset, selector] of [[0, '[data-white-move]'], [1, '[data-black-move]']]) {
       const cell = row.querySelector(selector);
       const move = moves[index + offset];
-      cell.textContent = move ? `${move.from}–${move.to}` : '···';
+      const promotion = move?.promotion ? `=${promotionLetters[move.promotion]}` : '';
+      cell.textContent = move ? `${move.from}–${move.to}${promotion}` : '···';
       cell.classList.toggle('latest', index + offset === moves.length - 1);
     }
     rows.append(row);
@@ -188,6 +219,7 @@ async function syncState() {
     const opponentJoined = !snapshot.room.black && next.room?.black;
     snapshot = next;
     selected = null;
+    if (promotionDialog.open) promotionDialog.close();
     render();
     notify(resultMessage(next.room) || (!next.room ? 'Your session has changed. Create or join a room.'
       : opponentJoined ? 'Your opponent joined. White to move.' : `Game updated. ${next.room.turn} to move.`));
@@ -211,7 +243,7 @@ board.addEventListener('click', (event) => {
   const piece = snapshot.pieces.get(coordinate);
   if (selected === coordinate) selected = null;
   else if (piece && pieceColor(piece) === color) selected = coordinate;
-  else if (selected) { perform('move', { from: selected, to: coordinate }); return; }
+  else if (selected) { submitMove(selected, coordinate); return; }
   else { notify('Select one of your pieces first.', true); return; }
   showPanel('moves');
   notify('');
