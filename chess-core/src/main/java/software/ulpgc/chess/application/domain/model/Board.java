@@ -19,11 +19,17 @@ public final class Board {
     }
 
     public Board move(Square from, Square to) {
+        return move(from, to, null);
+    }
+
+    Board move(Square from, Square to, Promotion promotion) {
         validateSquare(from);
         validateSquare(to);
         String rejection = moveRejection(from, to);
         if (rejection != null) throw new IllegalArgumentException(rejection);
-        return withPieceMoved(from, to);
+        if (promotion != null && !pieceAt(from).promotesOn(to.rank()))
+            throw new IllegalArgumentException("Only a pawn reaching the last rank can promote.");
+        return withPieceMoved(from, to, promotion);
     }
 
     private String moveRejection(Square from, Square to) {
@@ -44,9 +50,13 @@ public final class Board {
         return null;
     }
 
-    private Board withPieceMoved(Square from, Square to) {
+    private Board withPieceMoved(Square from, Square to, Promotion promotion) {
         Map<Square, Piece> movedPieces = new HashMap<>(pieces);
         Piece piece = movedPieces.remove(from);
+        if (piece.promotesOn(to.rank())) {
+            Promotion choice = promotion == null ? Promotion.Queen : promotion;
+            piece = choice.pieceOf(piece.color());
+        }
         movedPieces.put(to, piece);
         return new Board(movedPieces);
     }
@@ -62,7 +72,8 @@ public final class Board {
         for (File file : File.values()) {
             for (Rank rank : Rank.values()) {
                 Square to = new Square(file, rank);
-                if (moveRejection(from, to) == null && !withPieceMoved(from, to).isInCheck(color)) return true;
+                if (moveRejection(from, to) == null && !withPieceMoved(from, to, null).isInCheck(color))
+                    return true;
             }
         }
         return false;

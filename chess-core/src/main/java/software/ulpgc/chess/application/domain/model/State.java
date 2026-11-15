@@ -38,7 +38,7 @@ public record State(Board board, Color turn) {
             throw new IllegalArgumentException("No piece at origin");
         if (piece.color() != turn)
             throw new IllegalArgumentException("Piece does not belong to the current turn");
-        Board nextBoard = board.move(move.from(), move.to());
+        Board nextBoard = board.move(move.from(), move.to(), move.promotion());
         if (nextBoard.isInCheck(turn))
             throw new IllegalArgumentException("Your king would be in check.");
         return new State(nextBoard, opponent());

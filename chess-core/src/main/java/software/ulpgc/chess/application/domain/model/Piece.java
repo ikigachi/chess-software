@@ -48,6 +48,10 @@ public enum Piece {
         return this == WhitePawn || this == BlackPawn;
     }
 
+    boolean promotesOn(Rank rank) {
+        return isPawn() && rank == (color() == White ? Rank.R8 : Rank.R1);
+    }
+
     boolean isRook() {
         return this == WhiteRook || this == BlackRook;
     }
