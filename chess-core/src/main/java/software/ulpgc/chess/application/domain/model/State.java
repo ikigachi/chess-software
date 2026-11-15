@@ -21,6 +21,11 @@ public record State(Board board, Color turn) {
         return board.isInCheck(turn) && !board.hasLegalMove(turn);
     }
 
+    public boolean isStalemate() {
+        return board.hasKing(turn) && board.hasKing(opponent())
+                && !board.isInCheck(turn) && !board.hasLegalMove(turn);
+    }
+
     public Optional<Color> winner() {
         return isCheckmate() ? Optional.of(opponent()) : Optional.empty();
     }

@@ -68,12 +68,20 @@ public final class Board {
         return false;
     }
 
+    boolean hasKing(Color color) {
+        return pieces.containsValue(kingOf(color));
+    }
+
     boolean isInCheck(Color color) {
-        Piece king = color == Color.White ? WhiteKing : BlackKing;
+        Piece king = kingOf(color);
         for (var entry : pieces.entrySet()) {
             if (entry.getValue() == king) return isAttacked(entry.getKey(), color);
         }
         return false;
+    }
+
+    private static Piece kingOf(Color color) {
+        return color == Color.White ? WhiteKing : BlackKing;
     }
 
     private boolean isAttacked(Square square, Color defendingColor) {

@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static software.ulpgc.chess.application.domain.model.Piece.*;
 import static software.ulpgc.chess.application.domain.model.Square.at;
 
-class CheckmateTest {
+class GameEndingTest {
     @Test void identifiesFoolsMate() {
         State beforeMate = State.initial()
                 .move(move("f2", "f3"))
@@ -16,7 +16,9 @@ class CheckmateTest {
                 .move(move("g2", "g4"));
 
         assertFalse(beforeMate.isCheckmate());
-        assertTrue(beforeMate.move(move("d8", "h4")).isCheckmate());
+        State checkmate = beforeMate.move(move("d8", "h4"));
+        assertTrue(checkmate.isCheckmate());
+        assertFalse(checkmate.isStalemate());
     }
 
     @Test void aPieceCanPreventMateByBlockingTheAttack() {
@@ -34,11 +36,26 @@ class CheckmateTest {
         assertFalse(new State(board, Color.White).isCheckmate());
     }
 
-    @Test void havingNoLegalMoveWithoutCheckIsNotCheckmate() {
-        Board board = new Board(Map.of(at("c6"), WhiteKing, at("b6"), WhiteQueen, at("a8"), BlackKing));
+    @Test void aKingWithNoLegalMoveAndNoCheckIsStalemated() {
+        State state = new State(new Board(Map.of(at("c6"), WhiteKing, at("b6"), WhiteQueen,
+                at("a8"), BlackKing)), Color.Black);
 
-        assertFalse(board.hasLegalMove(Color.Black));
-        assertFalse(new State(board, Color.Black).isCheckmate());
+        assertTrue(state.isStalemate());
+        assertFalse(state.isCheckmate());
+        assertTrue(state.winner().isEmpty());
+    }
+
+    @Test void aLegalPawnMovePreventsStalemateEvenIfTheKingCannotMove() {
+        State state = new State(new Board(Map.of(at("c6"), WhiteKing, at("b6"), WhiteQueen,
+                at("a8"), BlackKing, at("h7"), BlackPawn)), Color.Black);
+
+        assertFalse(state.isStalemate());
+    }
+
+    @Test void anEmptyBoardIsNotStalemate() {
+        State state = new State(new Board(Map.of()), Color.White);
+
+        assertFalse(state.isStalemate());
     }
 
     private Move move(String from, String to) {
