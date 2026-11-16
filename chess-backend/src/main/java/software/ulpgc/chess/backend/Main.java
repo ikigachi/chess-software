@@ -5,10 +5,13 @@ import software.ulpgc.chess.backend.application.ports.RoomRepository;
 import software.ulpgc.chess.backend.application.usecases.*;
 import software.ulpgc.chess.backend.infrastructure.http.RoomJsonCodec;
 
+import java.nio.file.Path;
+
 public class Main {
     public static void main(String[] args) throws Exception {
         int port = args.length > 0 ? Integer.parseInt(args[0]) : 8080;
-        RoomRepository repository = new InMemoryRoomRepository();
+        Path database = Path.of(args.length > 1 ? args[1] : ".regalia/rooms.sqlite");
+        RoomRepository repository = new SqliteRoomRepository(database);
         GetRoomUseCase get = new GetRoomUseCase(repository);
         EnterRoomUseCase enter = new EnterRoomUseCase(get, new JoinRoomUseCase(repository));
         RoomApiHandler api = new RoomApiHandler(new CreateRoomUseCase(repository),

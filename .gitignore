@@ -1,6 +1,11 @@
 target/
 .kotlin
 out/
+/.regalia/
+*.sqlite
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
 
 ### IntelliJ IDEA ###
 .idea/

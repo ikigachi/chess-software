@@ -17,14 +17,14 @@ public final class ApiMessages {
             case "create" -> "Room created. Share code " + room.code() + " with your opponent.";
             case "join" -> "You are in room " + room.code() + ".";
             case "move" -> "Move recorded: " + request.move().from().coordinate() + " → " + request.move().to().coordinate() + ".";
-            case "leave" -> "You stopped viewing the room. The game remains in memory.";
+            case "leave" -> "You stopped viewing the room. Use the room code to reopen it.";
             default -> "Game refreshed.";
         };
     }
 
     public static String error(String message) {
         if (message == null) return FAILED;
-        if (message.startsWith("Room not found:")) return "Room not found. Check the code; if you restarted the server, create a new room.";
+        if (message.startsWith("Room not found:")) return "Room not found. Check the code and try again.";
         return switch (message) {
             case "Room is full" -> "The room already has two players.";
             case "Room must have two players before moving" -> "Wait for the second player to join.";

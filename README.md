@@ -11,6 +11,7 @@ Build a chess application where two users connect through a shared room code, pl
 | JDK | 27 |
 | Maven | Builds the three modules and resolves dependencies |
 | Gson | 2.14.0, backend JSON serialization |
+| SQLite JDBC | 3.54.1.0, local game storage |
 | JUnit Jupiter | 5.11.4, automated tests only |
 
 From the repository root:
@@ -21,7 +22,7 @@ mvn compile
 
 In IntelliJ, open the root `pom.xml`, select JDK 27, reload Maven and run `software.ulpgc.chess.backend.Main` using the `chess-backend` module. Open [Regalia](http://127.0.0.1:8080) in the browser.
 
-The Java server listens on `127.0.0.1:8080` and serves the frontend and API. Keep it running while playing.
+The Java server listens on `127.0.0.1:8080` and serves the frontend and API. It creates `.regalia/rooms.sqlite` in the working directory on first launch. To select a different local port and database file, set the IntelliJ program arguments to a port followed by a file path, for example `8081 .regalia/test.sqlite`.
 
 ## Delivery structure and main classes
 
@@ -68,11 +69,10 @@ The Java server listens on `127.0.0.1:8080` and serves the frontend and API. Kee
 flowchart LR
     F["Frontend: browser HTML, CSS and JavaScript"] -->|"HTTP form requests"| B["Backend: Java, port 8080"]
     B -->|"JSON responses and static files"| F
-    B --> R["InMemoryRoomRepository: RAM"]
-    D["Database: not implemented"]
+    B -->|"RoomRepository via JDBC"| D["SQLite database"]
 ```
 
-The frontend and backend are separate source modules but use one server and origin at runtime. The backend depends on `chess-core`; the browser does not execute Java. Rooms and sessions are stored in memory, with no connection to a database.
+The frontend and backend share one origin. The backend persists rooms in SQLite and manages the active browser sessions in memory. Browser cookies let the original players reopen a saved room with its code after a server restart.
 
 ### Backend hexagonal architecture
 
@@ -81,7 +81,7 @@ The frontend and backend are separate source modules but use one server and orig
 | Domain | `chess-core`: `application/domain/model`, including `Room`, `Game`, `State`, `Board`, `User` and `Move` |
 | Use cases | `chess-backend/application/usecases`: `CreateRoomUseCase`, `GetRoomUseCase`, `JoinRoomUseCase`, `EnterRoomUseCase`, `MoveUseCase` |
 | Storage port | `chess-backend/application/ports/RoomRepository` |
-| Storage adapter | `infrastructure/adapters/InMemoryRoomRepository` |
+| Storage adapter | `infrastructure/adapters/SqliteRoomRepository`. Tests can use `InMemoryRoomRepository` |
 | Incoming HTTP adapter | `infrastructure/adapters/RoomApiHandler`, registered by `RoomHttpServer` |
 | Transport support | `infrastructure/http`: `RoomActionRequest`, `RoomJsonCodec`, `ApiMessages`, `FormData`, `HttpResponses` |
 | Session and asset adapters | `infrastructure/adapters/BrowserSessions`, `StaticAssetHandler` |
@@ -115,17 +115,19 @@ The frontend uses `GET /api/state` to retrieve the game state and `POST /api/act
 | `Board` | Immutable mapping from `Square` to `Piece` |
 | `Move` | Origin, destination and optional promotion choice |
 
+The backend loads `chess-backend/src/main/resources/schema.sql` at startup. SQLite stores the room code, game identifier, players and creation time in `rooms`. The `moves` table stores the ordered moves and their optional promotion choices. Loading a game replays those moves to reconstruct its board, turn and result. A single transaction saves each room update and its history.
+
 The creator receives a six-character room code and plays White. The second user enters that code and plays Black. A third player is rejected. For local testing, use a normal and a private browser window; tabs in one profile share the same session. Click a piece and then a destination. Players, turns and moves update automatically by requesting the current state every two seconds while viewing a room. Refresh remains available for an immediate check. Drag-and-drop movement is not implemented.
 
 The server rejects moves that leave the moving player's king in check or attempt to capture the opposing king. Both players see which king is in check and can review the final position and move history after checkmate or stalemate. When a pawn reaches its last rank, the browser asks the player to choose a promotion piece. En passant is available on the immediate reply to an opposing pawn's double step. To castle, select the king and move it two squares toward the rook. The server checks castling rights, the path and the king's safety.
 
 ## Incorporated idea
 
-Players can reopen a room with its shared code during the same browser session and continue their game without losing its state or history.
+Players can reopen a room with its shared code and continue their game, even after restarting the server. Use the original browser sessions and keep their cookies to retain each player's seat. After restarting, reload Regalia and join again with the room code.
 
 ## Required screenshots
 
-User-provided captures from room `84A4FF`, with Ezequiel1 playing White and Ezequiel2 playing Black. The recorded history is held in memory, not persisted to a database.
+User-provided captures from room `84A4FF`, with Ezequiel1 playing White and Ezequiel2 playing Black. These captures show an earlier game recorded before SQLite storage was added.
 
 Board with both players:
 
@@ -147,7 +149,7 @@ Run all automated checks from the repository root:
 mvn test
 ```
 
-The latest run passed 76 tests. Coverage includes two independent cookie sessions, JSON responses, joining and reopening, token validation, piece movement, turn enforcement, king safety, checkmate, stalemate, pawn promotion, en passant and castling. Two browser sessions verified that the same game state appears for both players, including promotions, en passant captures and castling. The history survives a page reload, and the board becomes read-only after checkmate or stalemate.
+The latest run passed 82 tests. The same repository contract tests run against SQLite and in-memory storage. The SQLite tests also cover a database path that fails to open, rollback after a write failure and reopening a saved game after restart. To reproduce the restart check, play two moves, note the room code, restart the backend and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
 
 To verify the frontend service boundary, open Regalia and run this in the browser console. The test service should log `null` and `DEMO01` and send no API requests for these calls.
 
@@ -166,6 +168,5 @@ console.log((await actions.load()).room);
 console.log((await actions.perform('create', { name: 'Alice' })).room.code);
 ```
 
-The supplied captures show both users in room `84A4FF` and eight recorded moves, from `c2-c4` and `b8-c6` to `d1-a4` and `d7-d5`. They show the shared game state and in-memory history; persistent storage is still pending.
 
 Automatic synchronization was also checked with two independent sessions: the creator detected the joining opponent, both clients received `e2-e4` and `e7-e5`, and neither needed manual refresh. A selected piece remained selected across unchanged state checks.

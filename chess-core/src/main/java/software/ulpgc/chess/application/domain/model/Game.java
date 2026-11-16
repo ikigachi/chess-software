@@ -23,15 +23,23 @@ public final class Game {
         return new Game(id, State.initial(), List.of());
     }
 
+    public static Game replay(String id, List<Move> moves) {
+        if (moves == null) throw new IllegalArgumentException("Game must have a move history");
+        List<Move> history = List.copyOf(moves);
+        State state = State.initial();
+        for (Move move : history) state = state.move(move);
+        return new Game(id, state, history);
+    }
+
     public static Game restore(String id, State state, List<Move> moves) {
-        Game restored = new Game(id, state, moves);
-        State replayed = State.initial();
-        for (Move move : restored.moves) replayed = replayed.move(move);
+        if (state == null) throw new IllegalArgumentException("Game must have a state");
+        Game restored = replay(id, moves);
+        State replayed = restored.state;
         if (!replayed.board().equals(state.board()) || replayed.turn() != state.turn()
                 || state.enPassantTarget() != null && !state.enPassantTarget().equals(replayed.enPassantTarget())
                 || !state.castlingRights().isEmpty() && !state.castlingRights().equals(replayed.castlingRights()))
             throw new IllegalArgumentException("Game state does not match its move history");
-        return replayed.equals(state) ? restored : new Game(id, replayed, restored.moves);
+        return restored;
     }
 
     public String id() { return id; }

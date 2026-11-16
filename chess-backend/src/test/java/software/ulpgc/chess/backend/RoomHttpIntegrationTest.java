@@ -3,6 +3,7 @@ package software.ulpgc.chess.backend;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.io.TempDir;
 import software.ulpgc.chess.application.domain.model.*;
 import software.ulpgc.chess.backend.infrastructure.adapters.*;
 import software.ulpgc.chess.backend.application.ports.RoomRepository;
@@ -11,6 +12,7 @@ import software.ulpgc.chess.backend.infrastructure.http.*;
 
 import java.net.*;
 import java.net.http.*;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
@@ -23,7 +25,10 @@ class RoomHttpIntegrationTest {
     private final HttpClient black = browser();
 
     @BeforeEach void start() throws Exception {
-        RoomRepository repository = new InMemoryRoomRepository();
+        start(new InMemoryRoomRepository());
+    }
+
+    private void start(RoomRepository repository) throws Exception {
         rooms = new GetRoomUseCase(repository);
         RoomApiHandler api = new RoomApiHandler(new CreateRoomUseCase(repository), rooms,
                 new EnterRoomUseCase(rooms, new JoinRoomUseCase(repository)),
@@ -148,6 +153,39 @@ class RoomHttpIntegrationTest {
         var left = data(post(white, Map.of("token", csrf, "action", "leave")));
         assertTrue(left.get("room").isJsonNull());
         assertNotNull(rooms.execute(created.getAsJsonObject("room").get("code").getAsString()));
+    }
+
+    @Test void bothPlayersCanReopenAndContinueAfterRestart(@TempDir Path directory) throws Exception {
+        Path database = directory.resolve("rooms.sqlite");
+        stop();
+        start(new SqliteRoomRepository(database));
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        var created = data(post(white, Map.of("token", whiteToken, "action", "create", "name", "Alice")));
+        String code = created.getAsJsonObject("room").get("code").getAsString();
+        assertEquals(200, post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", code)).statusCode());
+        assertEquals(200, move(white, whiteToken, "e2", "e4").statusCode());
+        var beforeRestart = data(move(black, blackToken, "e7", "e5"));
+        stop();
+        start(new SqliteRoomRepository(database));
+
+        String newWhiteToken = token(white);
+        String newBlackToken = token(black);
+        assertNotEquals(whiteToken, newWhiteToken);
+        assertNotEquals(blackToken, newBlackToken);
+        HttpClient outsider = browser();
+        assertEquals(400, post(outsider, Map.of("token", token(outsider), "action", "join", "name", "Alice", "code", code)).statusCode());
+        var reopenedWhite = post(white, Map.of("token", newWhiteToken, "action", "join", "name", "Alice", "code", code));
+        var reopenedBlack = post(black, Map.of("token", newBlackToken, "action", "join", "name", "Bob", "code", code));
+        assertEquals(200, reopenedWhite.statusCode());
+        assertEquals(200, reopenedBlack.statusCode());
+        assertEquals(beforeRestart.get("room"), data(reopenedWhite).get("room"));
+        assertEquals(beforeRestart.get("room"), data(reopenedBlack).get("room"));
+        assertEquals(beforeRestart.get("pieces"), data(reopenedWhite).get("pieces"));
+        assertEquals(200, move(white, newWhiteToken, "g1", "f3").statusCode());
+        var continued = data(get(black, "/api/state")).getAsJsonObject("room");
+        assertEquals(3, continued.getAsJsonArray("moves").size());
+        assertEquals("Black", continued.get("turn").getAsString());
     }
 
     @Test void rejectsIgnoringCheckWithoutChangingTheGameAndAcceptsBlockingIt() throws Exception {
