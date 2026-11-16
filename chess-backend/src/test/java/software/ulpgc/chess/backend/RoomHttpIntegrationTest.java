@@ -79,6 +79,9 @@ class RoomHttpIntegrationTest {
         assertEquals(200, mainScript.statusCode());
         assertTrue(mainScript.headers().firstValue("Content-Type").orElseThrow().startsWith("text/javascript"));
         assertEquals(200, get(white, "/app.js").statusCode());
+        var roomActions = get(white, "/room-actions.js");
+        assertEquals(200, roomActions.statusCode());
+        assertTrue(roomActions.headers().firstValue("Content-Type").orElseThrow().startsWith("text/javascript"));
         assertEquals(200, get(white, "/room-api.js").statusCode());
         assertTrue(get(white, "/app.js").headers().firstValue("Content-Type").orElseThrow().startsWith("text/javascript"));
         for (String color : new String[]{"white", "black"}) {

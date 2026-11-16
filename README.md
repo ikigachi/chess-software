@@ -54,6 +54,7 @@ The Java server listens on `127.0.0.1:8080` and serves the frontend and API. Kee
 │       ├── style.css
 │       ├── main.js
 │       ├── app.js
+│       ├── room-actions.js
 │       ├── room-api.js
 │       └── assets/
 └── docs/screenshots/
@@ -92,12 +93,12 @@ Package paths in the backend are relative to `software/ulpgc/chess/backend`. `Ma
 | Role | Current implementation |
 | --- | --- |
 | UI | `index.html` templates, `style.css`, SVG assets and rendering functions in `app.js` |
-| Action coordination | `startApp()` and event handlers in `app.js` coordinate creating, joining, moving, refreshing and leaving |
-| Service boundary | The `state()` and `action()` operations used by `app.js` |
+| Interaction use cases | `RoomActions` in `room-actions.js` loads state, executes room actions, recovers after a rejected move and coordinates synchronization |
+| Service boundary | `RoomActions` receives a service with `state()` and `action(action, fields)`. Both return a snapshot on success |
 | Communication adapter | `RoomApi` in `room-api.js`, using `fetch` and `response.json()` |
-| Composition | `main.js` creates `RoomApi` and passes it to `startApp()` |
+| Composition | `main.js` connects `RoomApi` to `RoomActions` and passes the actions to `startApp()` |
 
-`app.js` still coordinates room actions alongside the event handlers. The injected service returns a game snapshot for each successful operation. The backend validates every submitted move.
+`app.js` handles browser events, square selection and rendering. `RoomActions` can run with a service double and without browser elements. The backend validates every submitted move.
 
 ## Communication contract
 
@@ -147,6 +148,23 @@ mvn test
 ```
 
 The latest run passed 76 tests. Coverage includes two independent cookie sessions, JSON responses, joining and reopening, token validation, piece movement, turn enforcement, king safety, checkmate, stalemate, pawn promotion, en passant and castling. Two browser sessions verified that the same game state appears for both players, including promotions, en passant captures and castling. The history survives a page reload, and the board becomes read-only after checkmate or stalemate.
+
+To verify the frontend service boundary, open Regalia and run this in the browser console. The test service should log `null` and `DEMO01` and send no API requests for these calls.
+
+```javascript
+const { RoomActions } = await import('/room-actions.js');
+const preview = { viewer: { id: 'demo', name: 'Guest' }, room: null, pieces: new Map() };
+const actions = new RoomActions({
+  state: async () => preview,
+  action: async (action, { name }) => {
+    if (action !== 'create') throw new Error('Unexpected action');
+    const viewer = { ...preview.viewer, name };
+    return { ...preview, viewer, room: { code: 'DEMO01', turn: 'White', white: viewer, black: null, moves: [] } };
+  }
+});
+console.log((await actions.load()).room);
+console.log((await actions.perform('create', { name: 'Alice' })).room.code);
+```
 
 The supplied captures show both users in room `84A4FF` and eight recorded moves, from `c2-c4` and `b8-c6` to `d1-a4` and `d7-d5`. They show the shared game state and in-memory history; persistent storage is still pending.
 

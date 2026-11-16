@@ -7,9 +7,6 @@ const promotionLetters = { queen: 'Q', rook: 'R', bishop: 'B', knight: 'N' };
 let snapshot;
 let selected = null;
 let busy = true;
-let stateVersion = 0;
-let syncing = false;
-let syncFailed = false;
 
 function notify(message, error = false) {
   const notice = find('#notice');
@@ -173,13 +170,13 @@ function render() {
   if (!find('#player-name').value && snapshot.viewer.name !== 'Guest') find('#player-name').value = snapshot.viewer.name;
 }
 
-async function performAction(api, action, fields = {}) {
+async function performAction(actions, action, fields) {
   if (busy) return;
-  stateVersion++;
-  syncFailed = false;
   setBusy(true);
   try {
-    snapshot = await api.action(action, fields);
+    const next = await actions.perform(action, fields);
+    if (!next) return;
+    snapshot = next;
     selected = null;
     render();
     if (action === 'create' || action === 'leave') showPanel('room');
@@ -187,33 +184,25 @@ async function performAction(api, action, fields = {}) {
     notify(positionMessage(snapshot.room) || snapshot.message);
   } catch (error) {
     notify(error.message, true);
-    if (action === 'move') {
-      try {
-        snapshot = await api.state();
-        selected = null;
-        render();
-      } catch {}
+    const recovered = await actions.recoverAfter(action);
+    if (recovered) {
+      snapshot = recovered;
+      selected = null;
+      render();
     }
   } finally { setBusy(false); }
 }
 
-function stateKey(state) {
-  return JSON.stringify([state.viewer, state.room, [...state.pieces].sort()]);
-}
-
-async function syncState(api) {
-  if (busy || syncing || !snapshot?.room) return;
-  const version = stateVersion;
-  syncing = true;
+async function syncState(actions) {
+  if (busy) return;
   try {
-    const next = await api.state();
-    if (busy || version !== stateVersion) return;
-    const recovered = syncFailed;
-    syncFailed = false;
-    if (stateKey(next) === stateKey(snapshot)) {
-      if (recovered) notify('Connection restored.');
+    const result = await actions.synchronize(snapshot);
+    if (!result) return;
+    if (result.recovered) {
+      notify('Connection restored.');
       return;
     }
+    const next = result.snapshot;
     const opponentJoined = !snapshot.room.black && next.room?.black;
     snapshot = next;
     selected = null;
@@ -222,11 +211,8 @@ async function syncState(api) {
     notify(positionMessage(next.room) || (!next.room ? 'Your session has changed. Create or join a room.'
       : opponentJoined ? 'Your opponent joined. White to move.' : `Game updated. ${next.room.turn} to move.`));
   } catch (error) {
-    if (!busy && version === stateVersion) {
-      syncFailed = true;
-      notify(error.message, true);
-    }
-  } finally { syncing = false; }
+    notify(error.message, true);
+  }
 }
 
 function handleBoardClick(event, perform) {
@@ -249,19 +235,19 @@ function handleBoardClick(event, perform) {
   board.querySelector(`[data-square="${coordinate}"]`).focus();
 }
 
-async function initialize(api) {
+async function initialize(actions) {
   setBusy(true);
   try {
-    snapshot = await api.state();
+    snapshot = await actions.load();
     render();
     notify('');
   } catch (error) { notify(error.message, true); }
   finally { setBusy(false); }
 }
 
-export function startApp(api) {
-  const perform = (action, fields) => performAction(api, action, fields);
-  const synchronize = () => syncState(api);
+export function startApp(actions) {
+  const perform = (action, fields) => performAction(actions, action, fields);
+  const synchronize = () => syncState(actions);
 
   board.addEventListener('click', (event) => handleBoardClick(event, perform));
   roomForm.addEventListener('submit', (event) => {
@@ -274,7 +260,7 @@ export function startApp(api) {
   find('.brand').addEventListener('click', (event) => { event.preventDefault(); showPanel('moves'); });
   find('.nav-item.active').addEventListener('click', (event) => { event.preventDefault(); showPanel('moves'); });
 
-  initialize(api);
+  initialize(actions);
   setInterval(synchronize, 2000);
   window.addEventListener('focus', synchronize);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) synchronize(); });
