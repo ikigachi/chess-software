@@ -12,11 +12,12 @@ import java.util.Map;
 public final class RoomJsonCodec {
     private final Gson gson = new GsonBuilder().serializeNulls().create();
 
-    public String snapshot(Room room, User viewer, String token, String message) {
+    public String snapshot(Room room, User viewer, String token, String message, boolean whiteConnected, boolean blackConnected) {
         Board board = room == null ? Board.initial() : room.game().state().board();
         Map<String, String> pieces = new LinkedHashMap<>();
         board.pieces().forEach((square, piece) -> pieces.put(square.coordinate(), piece.name()));
-        return gson.toJson(new Snapshot(user(viewer), roomView(room), pieces, token, message));
+        PresenceView presence = room == null ? null : new PresenceView(whiteConnected, blackConnected);
+        return gson.toJson(new Snapshot(user(viewer), roomView(room), pieces, presence, token, message));
     }
 
     public String error(String message, String token) {
@@ -40,7 +41,9 @@ public final class RoomJsonCodec {
         return user == null ? null : new UserView(user.id(), user.name());
     }
 
-    private record Snapshot(UserView viewer, RoomView room, Map<String, String> pieces, String token, String message) {}
+    private record Snapshot(UserView viewer, RoomView room, Map<String, String> pieces, PresenceView presence,
+                            String token, String message) {}
+    private record PresenceView(boolean whiteConnected, boolean blackConnected) {}
     private record UserView(String id, String name) {}
     private record RoomView(String code, String turn, boolean inCheck, String winner, boolean stalemate,
                             UserView white, UserView black, List<MoveView> moves) {}

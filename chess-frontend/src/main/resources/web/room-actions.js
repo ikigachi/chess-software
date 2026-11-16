@@ -42,6 +42,7 @@ export class RoomActions {
       const recovered = this.#syncFailed;
       this.#syncFailed = false;
       if (stateKey(next) !== stateKey(current)) return { snapshot: next };
+      if (presenceChanged(current.presence, next.presence)) return { snapshot: next, presenceOnly: true };
       if (recovered) return { recovered: true };
     } catch (error) {
       if (this.#performing || version !== this.#actionVersion) return;
@@ -55,4 +56,8 @@ export class RoomActions {
 
 function stateKey(state) {
   return JSON.stringify([state.viewer, state.room, [...state.pieces].sort()]);
+}
+
+function presenceChanged(previous, current) {
+  return previous?.whiteConnected !== current?.whiteConnected || previous?.blackConnected !== current?.blackConnected;
 }

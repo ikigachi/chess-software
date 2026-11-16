@@ -90,7 +90,10 @@ public final class RoomApiHandler implements HttpHandler {
     }
 
     private void snapshot(HttpExchange exchange, BrowserSessions.Session session, Room room, String message) throws IOException {
-        HttpResponses.json(exchange, 200, codec.snapshot(room, session.user, session.token, message));
+        boolean whiteConnected = room != null && sessions.isPresent(room.code(), room.white());
+        boolean blackConnected = room != null && sessions.isPresent(room.code(), room.black());
+        HttpResponses.json(exchange, 200, codec.snapshot(room, session.user, session.token, message,
+                whiteConnected, blackConnected));
     }
 
     private void error(HttpExchange exchange, int status, String message, BrowserSessions.Session session) throws IOException {

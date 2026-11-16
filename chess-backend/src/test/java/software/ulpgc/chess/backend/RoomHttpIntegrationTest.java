@@ -13,8 +13,12 @@ import software.ulpgc.chess.backend.infrastructure.http.*;
 import java.net.*;
 import java.net.http.*;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.InstantSource;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -29,10 +33,14 @@ class RoomHttpIntegrationTest {
     }
 
     private void start(RoomRepository repository) throws Exception {
+        start(repository, new BrowserSessions());
+    }
+
+    private void start(RoomRepository repository, BrowserSessions sessions) throws Exception {
         rooms = new GetRoomUseCase(repository);
         RoomApiHandler api = new RoomApiHandler(new CreateRoomUseCase(repository), rooms,
                 new EnterRoomUseCase(rooms, new JoinRoomUseCase(repository)),
-                new MoveUseCase(repository), new BrowserSessions(), new RoomJsonCodec());
+                new MoveUseCase(repository), sessions, new RoomJsonCodec());
         server = new RoomHttpServer(0, api, new StaticAssetHandler());
         server.start();
     }
@@ -219,13 +227,49 @@ class RoomHttpIntegrationTest {
         assertEquals("WhitePawn", updated.getAsJsonObject("pieces").get("g3").getAsString());
     }
 
+    @Test void reportsAnAbsentOpponentAndTheirReturnWithoutChangingTheGame() throws Exception {
+        AtomicLong elapsed = new AtomicLong();
+        InstantSource time = () -> Instant.ofEpochMilli(elapsed.get());
+        stop();
+        start(new InMemoryRoomRepository(), new BrowserSessions(time.withZone(ZoneOffset.UTC)));
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        var created = data(post(white, Map.of("token", whiteToken, "action", "create", "name", "Alice")));
+        String code = created.getAsJsonObject("room").get("code").getAsString();
+        var joined = post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", code));
+        assertEquals(200, joined.statusCode());
+        assertPresence(data(joined), true, true);
+        var played = data(move(white, whiteToken, "e2", "e4"));
+
+        elapsed.set(15_000);
+        var inactive = data(get(white, "/api/state"));
+        assertPresence(inactive, true, false);
+        assertEquals(played.get("room"), inactive.get("room"));
+        assertEquals(played.get("pieces"), inactive.get("pieces"));
+
+        assertPresence(data(get(black, "/api/state")), true, true);
+        assertPresence(data(get(white, "/api/state")), true, true);
+        assertEquals(200, post(black, Map.of("token", blackToken, "action", "leave")).statusCode());
+        assertPresence(data(get(white, "/api/state")), true, false);
+        var returned = post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", code));
+        assertEquals(200, returned.statusCode());
+        assertPresence(data(returned), true, true);
+        assertEquals(played.get("room"), data(returned).get("room"));
+    }
+
+    private void assertPresence(JsonObject snapshot, boolean whiteConnected, boolean blackConnected) {
+        var presence = snapshot.getAsJsonObject("presence");
+        assertEquals(whiteConnected, presence.get("whiteConnected").getAsBoolean());
+        assertEquals(blackConnected, presence.get("blackConnected").getAsBoolean());
+    }
+
     @Test void jsonSnapshotsPreserveUnicodeEscapingAndStructuredHistory() {
         User user = new User("a&b", "Zoë \"<&>\" +\n♟");
         Room waiting = Room.create("C&1", user);
         Room room = waiting.join(new User("b", "Renée"));
         room = room.move(user, new Move(Square.at("e2"), Square.at("e4")));
         RoomJsonCodec codec = new RoomJsonCodec();
-        var snapshot = JsonParser.parseString(codec.snapshot(room, user, "token", "Ready")).getAsJsonObject();
+        var snapshot = JsonParser.parseString(codec.snapshot(room, user, "token", "Ready", true, false)).getAsJsonObject();
         assertEquals(user.name(), snapshot.getAsJsonObject("viewer").get("name").getAsString());
         assertEquals("C&1", snapshot.getAsJsonObject("room").get("code").getAsString());
         assertEquals("e2", snapshot.getAsJsonObject("room").getAsJsonArray("moves").get(0).getAsJsonObject().get("from").getAsString());

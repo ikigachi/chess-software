@@ -64,15 +64,14 @@ function choosePromotion() {
 async function submitMove(from, to, perform) {
   const fields = { from, to };
   if (needsPromotion(from, to)) {
-    const current = snapshot;
     const promotion = await choosePromotion();
-    if (!promotion || snapshot !== current) return;
+    if (!promotion || selected !== from) return;
     fields.promotion = promotion;
   }
   await perform('move', fields);
 }
 
-function renderPlayer(target, player, color) {
+function renderPlayer(target, player, color, connected) {
   const element = clone('#player-template');
   const isWhite = color === 'White';
   const name = player?.name || (isWhite ? 'White' : 'Waiting for opponent');
@@ -87,7 +86,8 @@ function renderPlayer(target, player, color) {
   element.querySelector('[data-player-name]').textContent = name;
   element.querySelector('.you-tag').hidden = !isMe;
   element.querySelector('[data-player-color]').textContent = `${color} pieces`;
-  element.querySelector('[data-player-description]').textContent = player ? 'Friendly game' : 'Not joined yet';
+  element.querySelector('[data-player-description]').textContent = !player ? 'Not joined yet'
+    : connected === false ? 'Disconnected' : 'Friendly game';
   const status = element.querySelector('.player-status');
   status.textContent = isTurn ? 'To move' : color;
   status.classList.toggle('turn', isTurn);
@@ -149,10 +149,15 @@ function renderHistory() {
   find('#empty-history').hidden = moves.length > 0;
 }
 
+function renderPlayers() {
+  const room = snapshot.room;
+  renderPlayer('#top-player', room?.black, 'Black', snapshot.presence?.blackConnected);
+  renderPlayer('#bottom-player', room?.white || snapshot.viewer, 'White', snapshot.presence?.whiteConnected);
+}
+
 function render() {
   const room = snapshot.room;
-  renderPlayer('#top-player', room?.black, 'Black');
-  renderPlayer('#bottom-player', room?.white || snapshot.viewer, 'White');
+  renderPlayers();
   renderBoard();
   renderHistory();
   find('#room-subtitle').textContent = room ? `Room ${room.code} · Friendly game` : 'One board. Endless possibilities.';
@@ -203,6 +208,16 @@ async function syncState(actions) {
       return;
     }
     const next = result.snapshot;
+    if (result.presenceOnly) {
+      const previous = snapshot;
+      snapshot = next;
+      renderPlayers();
+      const connected = opponentConnected(next);
+      if (connected !== opponentConnected(previous)) {
+        notify(connected ? 'Your opponent reconnected.' : 'Your opponent disconnected. The game is saved.');
+      }
+      return;
+    }
     const opponentJoined = !snapshot.room.black && next.room?.black;
     snapshot = next;
     selected = null;
@@ -213,6 +228,10 @@ async function syncState(actions) {
   } catch (error) {
     notify(error.message, true);
   }
+}
+
+function opponentConnected(state) {
+  return state.room?.white.id === state.viewer.id ? state.presence?.blackConnected : state.presence?.whiteConnected;
 }
 
 function handleBoardClick(event, perform) {
