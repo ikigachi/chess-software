@@ -52,6 +52,7 @@ The Java server listens on `127.0.0.1:8080` and serves the frontend and API. Kee
 │   └── src/main/resources/web/
 │       ├── index.html
 │       ├── style.css
+│       ├── main.js
 │       ├── app.js
 │       ├── room-api.js
 │       └── assets/
@@ -91,11 +92,12 @@ Package paths in the backend are relative to `software/ulpgc/chess/backend`. `Ma
 | Role | Current implementation |
 | --- | --- |
 | UI | `index.html` templates, `style.css`, SVG assets and rendering functions in `app.js` |
-| Action coordination | `perform()` and event handlers in `app.js`: create, join, move, refresh and leave |
+| Action coordination | `startApp()` and event handlers in `app.js` coordinate creating, joining, moving, refreshing and leaving |
 | Service boundary | The `state()` and `action()` operations used by `app.js` |
 | Communication adapter | `RoomApi` in `room-api.js`, using `fetch` and `response.json()` |
+| Composition | `main.js` creates `RoomApi` and passes it to `startApp()` |
 
-The separation is currently lightweight: `app.js` constructs `RoomApi` directly. There is no independent use-case layer or injected service port in the frontend yet. Those remain architecture gaps relative to the full delivery requirements. The backend validates every submitted move.
+`app.js` still coordinates room actions alongside the event handlers. The injected service returns a game snapshot for each successful operation. The backend validates every submitted move.
 
 ## Communication contract
 

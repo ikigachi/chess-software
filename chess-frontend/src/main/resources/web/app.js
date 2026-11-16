@@ -1,6 +1,3 @@
-import { RoomApi } from './room-api.js';
-
-const api = new RoomApi();
 const find = (selector) => document.querySelector(selector);
 const clone = (id) => find(id).content.firstElementChild.cloneNode(true);
 const board = find('#board');
@@ -67,7 +64,7 @@ function choosePromotion() {
   return choice;
 }
 
-async function submitMove(from, to) {
+async function submitMove(from, to, perform) {
   const fields = { from, to };
   if (needsPromotion(from, to)) {
     const current = snapshot;
@@ -176,7 +173,7 @@ function render() {
   if (!find('#player-name').value && snapshot.viewer.name !== 'Guest') find('#player-name').value = snapshot.viewer.name;
 }
 
-async function perform(action, fields = {}) {
+async function performAction(api, action, fields = {}) {
   if (busy) return;
   stateVersion++;
   syncFailed = false;
@@ -204,7 +201,7 @@ function stateKey(state) {
   return JSON.stringify([state.viewer, state.room, [...state.pieces].sort()]);
 }
 
-async function syncState() {
+async function syncState(api) {
   if (busy || syncing || !snapshot?.room) return;
   const version = stateVersion;
   syncing = true;
@@ -232,7 +229,7 @@ async function syncState() {
   } finally { syncing = false; }
 }
 
-board.addEventListener('click', (event) => {
+function handleBoardClick(event, perform) {
   const button = event.target.closest('[data-square]');
   if (!button || boardLocked() || !snapshot) return;
   const room = snapshot.room;
@@ -244,25 +241,15 @@ board.addEventListener('click', (event) => {
   const piece = snapshot.pieces.get(coordinate);
   if (selected === coordinate) selected = null;
   else if (piece && pieceColor(piece) === color) selected = coordinate;
-  else if (selected) { submitMove(selected, coordinate); return; }
+  else if (selected) { submitMove(selected, coordinate, perform); return; }
   else { notify('Select one of your pieces first.', true); return; }
   showPanel('moves');
   notify('');
   renderBoard();
   board.querySelector(`[data-square="${coordinate}"]`).focus();
-});
+}
 
-roomForm.addEventListener('submit', (event) => {
-  event.preventDefault();
-  const fields = Object.fromEntries(new FormData(roomForm));
-  perform(event.submitter?.value || 'create', fields);
-});
-find('#refresh-game').addEventListener('click', () => perform('refresh'));
-find('#leave-room').addEventListener('click', () => perform('leave'));
-find('.brand').addEventListener('click', (event) => { event.preventDefault(); showPanel('moves'); });
-find('.nav-item.active').addEventListener('click', (event) => { event.preventDefault(); showPanel('moves'); });
-
-async function initialize() {
+async function initialize(api) {
   setBusy(true);
   try {
     snapshot = await api.state();
@@ -272,7 +259,23 @@ async function initialize() {
   finally { setBusy(false); }
 }
 
-initialize();
-setInterval(syncState, 2000);
-window.addEventListener('focus', syncState);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) syncState(); });
+export function startApp(api) {
+  const perform = (action, fields) => performAction(api, action, fields);
+  const synchronize = () => syncState(api);
+
+  board.addEventListener('click', (event) => handleBoardClick(event, perform));
+  roomForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const fields = Object.fromEntries(new FormData(roomForm));
+    perform(event.submitter?.value || 'create', fields);
+  });
+  find('#refresh-game').addEventListener('click', () => perform('refresh'));
+  find('#leave-room').addEventListener('click', () => perform('leave'));
+  find('.brand').addEventListener('click', (event) => { event.preventDefault(); showPanel('moves'); });
+  find('.nav-item.active').addEventListener('click', (event) => { event.preventDefault(); showPanel('moves'); });
+
+  initialize(api);
+  setInterval(synchronize, 2000);
+  window.addEventListener('focus', synchronize);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) synchronize(); });
+}

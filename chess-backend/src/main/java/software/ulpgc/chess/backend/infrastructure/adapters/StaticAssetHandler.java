@@ -17,7 +17,7 @@ public final class StaticAssetHandler implements HttpHandler {
             String path = exchange.getRequestURI().getPath();
             if (path.equals("/")) path = "/index.html";
             boolean piece = path.matches("/assets/pieces/(white|black)-(pawn|rook|knight|bishop|queen|king)\\.svg");
-            if (!piece && !Set.of("/index.html", "/style.css", "/app.js", "/room-api.js",
+            if (!piece && !Set.of("/index.html", "/style.css", "/main.js", "/app.js", "/room-api.js",
                     "/assets/crown.svg", "/assets/stone.svg", "/assets/marble-bust.png").contains(path)) {
                 HttpResponses.text(exchange, 404, "Not found");
                 return;

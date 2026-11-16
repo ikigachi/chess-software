@@ -67,7 +67,7 @@ class RoomHttpIntegrationTest {
         var response = get(white, "/");
         assertEquals(200, response.statusCode());
         assertTrue(response.body().contains("A game, without haste."));
-        assertTrue(response.body().contains("<script type=\"module\" src=\"/app.js\""));
+        assertTrue(response.body().contains("<script type=\"module\" src=\"/main.js\""));
         assertTrue(response.body().contains("id=\"square-template\""));
         assertFalse(response.body().contains("{{"));
         var preview = data(get(white, "/api/state"));
@@ -75,6 +75,9 @@ class RoomHttpIntegrationTest {
         assertEquals(32, preview.getAsJsonObject("pieces").size());
         assertEquals("Guest", preview.getAsJsonObject("viewer").get("name").getAsString());
         assertEquals(200, get(white, "/style.css").statusCode());
+        var mainScript = get(white, "/main.js");
+        assertEquals(200, mainScript.statusCode());
+        assertTrue(mainScript.headers().firstValue("Content-Type").orElseThrow().startsWith("text/javascript"));
         assertEquals(200, get(white, "/app.js").statusCode());
         assertEquals(200, get(white, "/room-api.js").statusCode());
         assertTrue(get(white, "/app.js").headers().firstValue("Content-Type").orElseThrow().startsWith("text/javascript"));
