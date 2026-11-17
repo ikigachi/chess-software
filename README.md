@@ -97,7 +97,7 @@ This is the first service extraction from the architecture discussed in class. R
 | Domain | `chess-core`: `application/domain/model`, including `Room`, `Game`, `State`, `Board`, `User` and `Move` |
 | Use cases | `game-service/application/usecases`: `CreateRoomUseCase`, `GetRoomUseCase`, `JoinRoomUseCase`, `EnterRoomUseCase`, `MoveUseCase` |
 | Storage port | `game-service/application/ports/RoomRepository` |
-| Storage adapter | `infrastructure/adapters/SqliteRoomRepository`. Tests can use `InMemoryRoomRepository` |
+| Storage adapter | `infrastructure/adapters/SqliteRoomRepository`, with `SqliteDatabase` for initialization and configured connections. Tests can use `InMemoryRoomRepository` |
 | Incoming HTTP adapters | `infrastructure/adapters/RoomApiHandler` and `GameApiHandler`, registered by `GameHttpServer` |
 | Transport support | `infrastructure/http`: `RoomActionRequest`, `RoomJsonCodec`, `ApiMessages`, `FormData`, `HttpResponses` |
 | Sessions | `infrastructure/adapters/BrowserSessions` |
@@ -138,7 +138,7 @@ The frontend uses `GET /api/state` to retrieve the game state and `POST /api/act
 | `Board` | Immutable mapping from `Square` to `Piece` |
 | `Move` | Origin, destination and optional promotion choice |
 
-The game service loads `game-service/src/main/resources/schema.sql` at startup. SQLite stores the room code, game identifier, players and creation time in `rooms`. The `moves` table stores the ordered moves and their optional promotion choices. Loading a game replays those moves to reconstruct its board, turn and result. A single transaction saves each room update and its history.
+At startup, `Main` initializes `SqliteDatabase` with `game-service/src/main/resources/schema.sql` and passes it to the repository. SQLite stores the room code, game identifier, players and creation time in `rooms`. The `moves` table stores the ordered moves and their optional promotion choices. Loading a game checks that move numbering starts at one without gaps and replays those moves to reconstruct its board, turn and result. A single transaction saves each room update and its history.
 
 The creator receives a six-character room code and plays White. The second user enters that code and plays Black. A third player is rejected. For local testing, use a normal and a private browser window. Tabs in one profile share the same session. Click a piece and then a destination. Players, turns and moves update automatically by requesting the current state every two seconds while viewing a room. A player appears disconnected after 15 seconds without an API request or when they stop viewing the room. Their seat and move history are preserved. Refresh remains available for an immediate check.
 
@@ -172,7 +172,7 @@ Run all automated checks from the repository root:
 mvn test
 ```
 
-The latest run passed 90 tests. The same repository contract tests run against SQLite and in-memory storage. HTTP integration tests run the web server and game service separately, exercising Javalin routing, JSON game creation, forwarded cookies, concurrent joining, game queries and actions. They also check that an unavailable game service produces `503` while the page remains accessible. To reproduce the restart check, play two moves, note the room code, restart the game service and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
+The latest run passed 92 tests. The same repository contract tests run against SQLite and in-memory storage. Storage tests also check rejected writes, invalid move numbering and foreign-key enforcement on every connection. HTTP integration tests run the web server and game service separately, exercising Javalin routing, JSON game creation, forwarded cookies, concurrent joining, game queries and actions. They also check that an unavailable game service produces `503` while the page remains accessible. To reproduce the restart check, play two moves, note the room code, restart the game service and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 

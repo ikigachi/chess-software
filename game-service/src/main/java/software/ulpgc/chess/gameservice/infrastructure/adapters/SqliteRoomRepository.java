@@ -3,45 +3,24 @@ package software.ulpgc.chess.gameservice.infrastructure.adapters;
 import software.ulpgc.chess.application.domain.model.*;
 import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 public final class SqliteRoomRepository implements RoomRepository {
-    private final String url;
+    private final SqliteDatabase database;
 
-    public SqliteRoomRepository(Path database) {
-        Path path = database.toAbsolutePath().normalize();
-        url = "jdbc:sqlite:" + path;
-        try {
-            Files.createDirectories(path.getParent());
-            initialize();
-        } catch (IOException | SQLException exception) {
-            throw new IllegalStateException("Could not initialize room storage.", exception);
-        }
-    }
-
-    private void initialize() throws IOException, SQLException {
-        String schema;
-        try (var input = SqliteRoomRepository.class.getResourceAsStream("/schema.sql")) {
-            if (input == null) throw new IOException("Missing database schema resource: schema.sql");
-            schema = new String(input.readAllBytes(), StandardCharsets.UTF_8);
-        }
-        try (Connection connection = DriverManager.getConnection(url); Statement statement = connection.createStatement()) {
-            statement.executeUpdate(schema);
-        }
+    public SqliteRoomRepository(SqliteDatabase database) {
+        this.database = Objects.requireNonNull(database);
     }
 
     @Override public Optional<Room> findByCode(String code) {
         if (code == null || code.isBlank()) throw new IllegalArgumentException("Room code cannot be empty");
-        try (Connection connection = DriverManager.getConnection(url);
+        try (Connection connection = database.openConnection();
              PreparedStatement query = connection.prepareStatement("""
-                     SELECT game_id, white_id, white_name, black_id, black_name, origin, destination, promotion
+                     SELECT game_id, white_id, white_name, black_id, black_name, ply, origin, destination, promotion
                      FROM rooms LEFT JOIN moves ON rooms.code = moves.room_code
                      WHERE rooms.code = ? ORDER BY moves.ply
                      """)) {
@@ -60,23 +39,26 @@ public final class SqliteRoomRepository implements RoomRepository {
         User white = new User(rows.getString("white_id"), rows.getString("white_name"));
         String blackId = rows.getString("black_id");
         User black = blackId == null ? null : new User(blackId, rows.getString("black_name"));
+        return new Room(code, white, black, Game.replay(gameId, readMoves(rows)));
+    }
+
+    private List<Move> readMoves(ResultSet rows) throws SQLException {
+        if (rows.getObject("ply") == null) return List.of();
         List<Move> moves = new ArrayList<>();
         do {
+            if (rows.getInt("ply") != moves.size() + 1)
+                throw new SQLException("Stored move history must start at 1 and have no gaps.");
             String origin = rows.getString("origin");
-            if (origin == null) break;
             String promotion = rows.getString("promotion");
             moves.add(new Move(Square.at(origin), Square.at(rows.getString("destination")),
                     promotion == null ? null : Promotion.valueOf(promotion)));
         } while (rows.next());
-        return new Room(code, white, black, Game.replay(gameId, moves));
+        return moves;
     }
 
     @Override public void save(Room room) {
         if (room == null) throw new IllegalArgumentException("Room cannot be null");
-        try (Connection connection = DriverManager.getConnection(url)) {
-            try (Statement statement = connection.createStatement()) {
-                statement.execute("PRAGMA foreign_keys = ON");
-            }
+        try (Connection connection = database.openConnection()) {
             connection.setAutoCommit(false);
             try {
                 saveRoom(connection, room);

@@ -304,7 +304,9 @@ class RoomHttpIntegrationTest {
     }
 
     @Test void bothPlayersCanReopenAndContinueAfterRestart(@TempDir Path directory) throws Exception {
-        Path database = directory.resolve("rooms.sqlite");
+        Path path = directory.resolve("rooms.sqlite");
+        SqliteDatabase database = new SqliteDatabase(path);
+        database.initialize();
         stop();
         start(new SqliteRoomRepository(database));
         String whiteToken = token(white);
@@ -317,6 +319,8 @@ class RoomHttpIntegrationTest {
         assertEquals(200, move(white, whiteToken, "e2", "e4").statusCode());
         var beforeRestart = data(move(black, blackToken, "e7", "e5"));
         stop();
+        database = new SqliteDatabase(path);
+        database.initialize();
         start(new SqliteRoomRepository(database));
 
         var savedGame = get(browser(), "/games/" + code);

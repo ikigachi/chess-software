@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import software.ulpgc.chess.application.domain.model.*;
 import software.ulpgc.chess.gameservice.infrastructure.adapters.SqliteRoomRepository;
+import software.ulpgc.chess.gameservice.infrastructure.adapters.SqliteDatabase;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,7 +20,7 @@ class SqliteRoomRepositoryTest {
     @Test void reportsAPathThatSQLiteCannotOpen() throws Exception {
         Path database = Files.createDirectory(directory.resolve("rooms.sqlite"));
 
-        var failure = assertThrows(IllegalStateException.class, () -> new SqliteRoomRepository(database));
+        var failure = assertThrows(IllegalStateException.class, () -> repository(database));
 
         assertEquals("Could not initialize room storage.", failure.getMessage());
         assertInstanceOf(SQLException.class, failure.getCause());
@@ -27,13 +28,13 @@ class SqliteRoomRepositoryTest {
 
     @Test void reloadsWaitingAndPlayedRoomsWithTheRecordedPromotion() {
         Path database = directory.resolve("chess/rooms.sqlite");
-        var repository = new SqliteRoomRepository(database);
+        var repository = repository(database);
         assertTrue(repository.findByCode("MISSING").isEmpty());
         User white = new User("white", "Zoë");
         User black = new User("black", "Renée");
         Room room = Room.create("GAME01", white);
         repository.save(room);
-        assertEquals(room, new SqliteRoomRepository(database).findByCode(room.code()).orElseThrow());
+        assertEquals(room, repository(database).findByCode(room.code()).orElseThrow());
 
         room = room.join(black);
         List<String> moves = List.of("a2a4", "h7h5", "a4a5", "h5h4", "a5a6", "h4h3", "a6b7", "h3g2");
@@ -44,14 +45,14 @@ class SqliteRoomRepositoryTest {
         room = room.move(white, move("b7a8", Promotion.Knight));
         repository.save(room);
 
-        Room restored = new SqliteRoomRepository(database).findByCode(room.code()).orElseThrow();
+        Room restored = repository(database).findByCode(room.code()).orElseThrow();
         assertEquals(room, restored);
         assertEquals(Piece.WhiteKnight, restored.game().pieceAt(Square.at("a8")));
     }
 
     @Test void aFailedSavePreservesBothPlayersAndTheExistingHistory() throws Exception {
         Path database = directory.resolve("rooms.sqlite");
-        var repository = new SqliteRoomRepository(database);
+        var repository = repository(database);
         User white = new User("white", "Alice");
         User black = new User("black", "Bob");
         Room saved = Room.create("GAME01", white).join(black).move(white, move("e2e4", null));
@@ -67,7 +68,43 @@ class SqliteRoomRepositoryTest {
                 saved.move(black, move("e7e5", null)).game());
 
         assertThrows(IllegalStateException.class, () -> repository.save(changed));
-        assertEquals(saved, new SqliteRoomRepository(database).findByCode(saved.code()).orElseThrow());
+        assertEquals(saved, repository(database).findByCode(saved.code()).orElseThrow());
+    }
+
+    @Test void rejectsGapsAndMissingFirstMovesWithoutChangingStoredHistory() throws Exception {
+        Path path = directory.resolve("rooms.sqlite");
+        var repository = repository(path);
+        User white = new User("white", "Alice");
+        User black = new User("black", "Bob");
+        for (int ply : List.of(1, 2)) {
+            Room room = Room.create("GAME0" + ply, white).join(black)
+                    .move(white, move("e2e4", null)).move(black, move("e7e5", null));
+            repository.save(room);
+            try (var connection = DriverManager.getConnection("jdbc:sqlite:" + path);
+                 var statement = connection.prepareStatement("UPDATE moves SET ply = 3 WHERE room_code = ? AND ply = ?")) {
+                statement.setString(1, room.code());
+                statement.setInt(2, ply);
+                assertEquals(1, statement.executeUpdate());
+            }
+
+            var failure = assertThrows(IllegalStateException.class, () -> repository.findByCode(room.code()));
+            assertEquals("Could not load the room.", failure.getMessage());
+            assertInstanceOf(SQLException.class, failure.getCause());
+
+            try (var connection = DriverManager.getConnection("jdbc:sqlite:" + path);
+                 var statement = connection.prepareStatement("UPDATE moves SET ply = ? WHERE room_code = ? AND ply = 3")) {
+                statement.setInt(1, ply);
+                statement.setString(2, room.code());
+                assertEquals(1, statement.executeUpdate());
+            }
+            assertEquals(room, repository.findByCode(room.code()).orElseThrow());
+        }
+    }
+
+    private SqliteRoomRepository repository(Path path) {
+        SqliteDatabase database = new SqliteDatabase(path);
+        database.initialize();
+        return new SqliteRoomRepository(database);
     }
 
     private Move move(String notation, Promotion promotion) {

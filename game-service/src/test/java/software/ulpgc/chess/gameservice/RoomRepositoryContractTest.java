@@ -8,6 +8,7 @@ import software.ulpgc.chess.application.domain.model.User;
 import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
 import software.ulpgc.chess.gameservice.infrastructure.adapters.InMemoryRoomRepository;
 import software.ulpgc.chess.gameservice.infrastructure.adapters.SqliteRoomRepository;
+import software.ulpgc.chess.gameservice.infrastructure.adapters.SqliteDatabase;
 
 import java.nio.file.Path;
 
@@ -20,7 +21,9 @@ class RoomRepositoryContractTest {
     }
 
     @Test void sqliteRepositorySupportsTheRoomWorkflow(@TempDir Path directory) {
-        verifyRoomWorkflow(new SqliteRoomRepository(directory.resolve("rooms.sqlite")));
+        SqliteDatabase database = new SqliteDatabase(directory.resolve("rooms.sqlite"));
+        database.initialize();
+        verifyRoomWorkflow(new SqliteRoomRepository(database));
     }
 
     private void verifyRoomWorkflow(RoomRepository repository) {
