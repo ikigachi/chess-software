@@ -90,6 +90,24 @@ The browser uses the web server as its origin. The web server and game service u
 
 This is the first service extraction from the architecture discussed in class. Room coordination remains in `game-service` during this step. Separate player, matches, registration and authentication services, together with NGINX routing, are pending.
 
+### Planned service boundaries
+
+This is the target for the next extractions. The current executable system remains the two processes described above.
+
+| Component | Responsibility and data ownership |
+| --- | --- |
+| `player-service` | Stable player identifiers and public display names |
+| `game-service` | Authoritative chess state, move validation, ordered move history and game result |
+| `matches-service` | Room codes, White and Black seats, participant records, creation date and associated game identifier; lists matches and obtains their state and moves from `game-service` |
+| `register-service` | Account creation and deactivation, account status and the association with a stable player identifier |
+| Authentication service | Checks active accounts and credentials and manages authenticated sessions; shares the account database with `register-service`, as discussed in class |
+| Frontend | Board presentation and user interaction through the service contracts |
+| NGINX | Serves frontend files and routes HTTP requests to the services |
+
+A participant record preserves the player identifier and display name used in that match. Account deactivation must end access while preserving recorded matches and moves. A display-name change must not rewrite the names recorded in earlier matches. Services identify the acting user from a verified session, rather than trusting a player identifier supplied by the frontend.
+
+Services communicate through HTTP and JSON using application ports and infrastructure adapters. Each service controls writes to its own data; registration and authentication share account storage. Until room and game storage have been separated with failure handling in place, the existing room-and-move transaction stays in `game-service`. The current `chess-backend` forwarding and file-serving responsibilities will be replaced by NGINX when that routing is implemented.
+
 ### Backend hexagonal architecture
 
 | Role | Concrete packages and classes |
