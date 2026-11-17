@@ -1,4 +1,4 @@
-package software.ulpgc.chess.backend.infrastructure.http;
+package software.ulpgc.chess.gameservice.infrastructure.http;
 
 import java.net.URLDecoder;
 import java.net.URLEncoder;

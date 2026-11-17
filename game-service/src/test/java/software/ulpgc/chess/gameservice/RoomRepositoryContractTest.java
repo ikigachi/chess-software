@@ -1,13 +1,13 @@
-package software.ulpgc.chess.backend;
+package software.ulpgc.chess.gameservice;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import software.ulpgc.chess.application.domain.model.Move;
 import software.ulpgc.chess.application.domain.model.Room;
 import software.ulpgc.chess.application.domain.model.User;
-import software.ulpgc.chess.backend.application.ports.RoomRepository;
-import software.ulpgc.chess.backend.infrastructure.adapters.InMemoryRoomRepository;
-import software.ulpgc.chess.backend.infrastructure.adapters.SqliteRoomRepository;
+import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
+import software.ulpgc.chess.gameservice.infrastructure.adapters.InMemoryRoomRepository;
+import software.ulpgc.chess.gameservice.infrastructure.adapters.SqliteRoomRepository;
 
 import java.nio.file.Path;
 

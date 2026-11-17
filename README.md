@@ -9,7 +9,7 @@ Build a chess application where two users connect through a shared room code, pl
 | Dependency | Version or use |
 | --- | --- |
 | JDK | 27 |
-| Maven | Builds the three modules and resolves dependencies |
+| Maven | Builds the four modules and resolves dependencies |
 | Gson | 2.14.0, backend JSON serialization |
 | SQLite JDBC | 3.54.1.0, local game storage |
 | JUnit Jupiter | 5.11.4, automated tests only |
@@ -20,9 +20,13 @@ From the repository root:
 mvn compile
 ```
 
-In IntelliJ, open the root `pom.xml`, select JDK 27, reload Maven and run `software.ulpgc.chess.backend.Main` using the `chess-backend` module. Open [Regalia](http://127.0.0.1:8080) in the browser.
+In IntelliJ, open the root `pom.xml`, select JDK 27 and reload Maven. Use the repository root as the working directory for both run configurations.
 
-The Java server listens on `127.0.0.1:8080` and serves the frontend and API. It creates `.regalia/rooms.sqlite` in the working directory on first launch. To select a different local port and database file, set the IntelliJ program arguments to a port followed by a file path, for example `8081 .regalia/test.sqlite`.
+1. Run `software.ulpgc.chess.gameservice.Main` using the `game-service` module. It listens on `127.0.0.1:8081` and creates `.regalia/rooms.sqlite` on first launch.
+2. Run `software.ulpgc.chess.backend.Main` using the `chess-backend` module. It serves the frontend on `127.0.0.1:8080` and forwards API requests to the game service.
+3. Open [Regalia](http://127.0.0.1:8080) in the browser. Keep both programs running while playing.
+
+For a different game-service port and database file, use program arguments such as `8091 .regalia/test.sqlite`. Configure the web server with its port and the matching service origin, such as `8090 http://127.0.0.1:8091`. SQLite files created by the previous single-server version remain compatible.
 
 ## Delivery structure and main classes
 
@@ -38,15 +42,23 @@ The Java server listens on `127.0.0.1:8080` and serves the frontend and API. It 
 │       │   ├── application/ports/
 │       │   └── infrastructure/adapters/
 │       └── test/java/software/ulpgc/chess/application/domain/model/
-├── chess-backend/
+├── game-service/
 │   ├── pom.xml
 │   └── src/
-│       ├── main/java/software/ulpgc/chess/backend/
+│       ├── main/java/software/ulpgc/chess/gameservice/
 │       │   ├── Main.java
 │       │   ├── application/ports/
 │       │   ├── application/usecases/
 │       │   ├── infrastructure/adapters/
 │       │   └── infrastructure/http/
+│       ├── main/resources/schema.sql
+│       └── test/java/software/ulpgc/chess/gameservice/
+├── chess-backend/
+│   ├── pom.xml
+│   └── src/
+│       ├── main/java/software/ulpgc/chess/backend/
+│       │   ├── Main.java
+│       │   └── infrastructure/
 │       └── test/java/software/ulpgc/chess/backend/
 ├── chess-frontend/
 │   ├── pom.xml
@@ -61,32 +73,35 @@ The Java server listens on `127.0.0.1:8080` and serves the frontend and API. It 
 └── docs/screenshots/
 ```
 
-`chess-core` defines the chess rules and data model and supports loading board positions from FEN. `chess-backend` manages rooms and games and handles browser requests. `chess-frontend` displays the board, players and move history and lets users interact with the game.
+`chess-core` defines the chess rules and data model and supports loading board positions from FEN. `game-service` executes room and game operations, manages sessions and stores matches. `chess-backend` serves the page and forwards HTTP requests. `chess-frontend` displays the board, players and move history and lets users interact with the game.
 
 ## System architecture
 
 ```mermaid
 flowchart LR
-    F["Frontend: browser HTML, CSS and JavaScript"] -->|"HTTP form requests"| B["Backend: Java, port 8080"]
-    B -->|"JSON responses and static files"| F
-    B -->|"RoomRepository via JDBC"| D["SQLite database"]
+    F["Frontend in browser"] -->|"HTTP"| W["Web server: port 8080"]
+    W -->|"HTTP proxy"| G["Game service: port 8081"]
+    G -->|"RoomRepository via JDBC"| D["SQLite database"]
 ```
 
-The frontend and backend share one origin. The backend persists rooms in SQLite and manages the active browser sessions in memory. Browser cookies let the original players reopen a saved room with its code after a server restart.
+The browser uses the web server as its origin. The web server and game service run in separate Java processes and communicate through HTTP. The game service persists rooms in SQLite and manages active browser sessions in memory. Browser cookies let the original players reopen a saved room with its code after restarting the game service.
+
+This is the first service extraction from the architecture discussed in class. Room coordination remains in `game-service` during this step. Separate player, matches, registration and authentication services, together with NGINX routing, are pending.
 
 ### Backend hexagonal architecture
 
 | Role | Concrete packages and classes |
 | --- | --- |
 | Domain | `chess-core`: `application/domain/model`, including `Room`, `Game`, `State`, `Board`, `User` and `Move` |
-| Use cases | `chess-backend/application/usecases`: `CreateRoomUseCase`, `GetRoomUseCase`, `JoinRoomUseCase`, `EnterRoomUseCase`, `MoveUseCase` |
-| Storage port | `chess-backend/application/ports/RoomRepository` |
+| Use cases | `game-service/application/usecases`: `CreateRoomUseCase`, `GetRoomUseCase`, `JoinRoomUseCase`, `EnterRoomUseCase`, `MoveUseCase` |
+| Storage port | `game-service/application/ports/RoomRepository` |
 | Storage adapter | `infrastructure/adapters/SqliteRoomRepository`. Tests can use `InMemoryRoomRepository` |
-| Incoming HTTP adapters | `infrastructure/adapters/RoomApiHandler` and `GameApiHandler`, registered by `RoomHttpServer` |
+| Incoming HTTP adapters | `infrastructure/adapters/RoomApiHandler` and `GameApiHandler`, registered by `GameHttpServer` |
 | Transport support | `infrastructure/http`: `RoomActionRequest`, `RoomJsonCodec`, `ApiMessages`, `FormData`, `HttpResponses` |
-| Session and asset adapters | `infrastructure/adapters/BrowserSessions`, `StaticAssetHandler` |
+| Sessions | `infrastructure/adapters/BrowserSessions` |
+| Web entry point | `chess-backend` uses `GameServiceProxy` for HTTP forwarding and `StaticAssetHandler` for frontend resources |
 
-Package paths in the backend are relative to `software/ulpgc/chess/backend`. `Main` connects the collaborators through constructors. Storage-facing use cases depend on `RoomRepository`, while `EnterRoomUseCase` composes lookup and joining. Domain rules do not depend on HTTP, JSON or storage implementations.
+Game-service package paths are relative to `software/ulpgc/chess/gameservice`. Its `Main` connects the collaborators through constructors. Storage-facing use cases depend on `RoomRepository`, while `EnterRoomUseCase` composes lookup and joining. Domain rules do not depend on HTTP, JSON or storage implementations.
 
 ### Lightweight frontend architecture
 
@@ -117,7 +132,7 @@ The frontend uses `GET /api/state` to retrieve the game state and `POST /api/act
 | `Board` | Immutable mapping from `Square` to `Piece` |
 | `Move` | Origin, destination and optional promotion choice |
 
-The backend loads `chess-backend/src/main/resources/schema.sql` at startup. SQLite stores the room code, game identifier, players and creation time in `rooms`. The `moves` table stores the ordered moves and their optional promotion choices. Loading a game replays those moves to reconstruct its board, turn and result. A single transaction saves each room update and its history.
+The game service loads `game-service/src/main/resources/schema.sql` at startup. SQLite stores the room code, game identifier, players and creation time in `rooms`. The `moves` table stores the ordered moves and their optional promotion choices. Loading a game replays those moves to reconstruct its board, turn and result. A single transaction saves each room update and its history.
 
 The creator receives a six-character room code and plays White. The second user enters that code and plays Black. A third player is rejected. For local testing, use a normal and a private browser window. Tabs in one profile share the same session. Click a piece and then a destination. Players, turns and moves update automatically by requesting the current state every two seconds while viewing a room. A player appears disconnected after 15 seconds without an API request or when they stop viewing the room. Their seat and move history are preserved. Refresh remains available for an immediate check.
 
@@ -151,7 +166,7 @@ Run all automated checks from the repository root:
 mvn test
 ```
 
-The latest run passed 85 tests. The same repository contract tests run against SQLite and in-memory storage. The SQLite tests cover an invalid database path, rollback after a write failure and reopening a saved game after restart. HTTP tests check direct game queries, missing games and unsupported methods. To reproduce the restart check, play two moves, note the room code, restart the backend and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
+The latest run passed 86 tests. The same repository contract tests run against SQLite and in-memory storage. HTTP integration tests run the web server and game service separately, exercising forwarded cookies, game queries and actions. They also check that an unavailable game service produces `503` while the page remains accessible. To reproduce the restart check, play two moves, note the room code, restart the game service and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 

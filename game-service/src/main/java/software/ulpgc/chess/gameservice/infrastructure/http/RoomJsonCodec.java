@@ -1,4 +1,4 @@
-package software.ulpgc.chess.backend.infrastructure.http;
+package software.ulpgc.chess.gameservice.infrastructure.http;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;

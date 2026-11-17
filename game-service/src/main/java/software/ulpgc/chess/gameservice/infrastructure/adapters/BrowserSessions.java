@@ -1,4 +1,4 @@
-package software.ulpgc.chess.backend.infrastructure.adapters;
+package software.ulpgc.chess.gameservice.infrastructure.adapters;
 
 import com.sun.net.httpserver.HttpExchange;
 import software.ulpgc.chess.application.domain.model.User;

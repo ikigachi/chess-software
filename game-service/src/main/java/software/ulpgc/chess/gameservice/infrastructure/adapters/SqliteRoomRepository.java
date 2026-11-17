@@ -1,7 +1,7 @@
-package software.ulpgc.chess.backend.infrastructure.adapters;
+package software.ulpgc.chess.gameservice.infrastructure.adapters;
 
 import software.ulpgc.chess.application.domain.model.*;
-import software.ulpgc.chess.backend.application.ports.RoomRepository;
+import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

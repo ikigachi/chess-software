@@ -6,9 +6,10 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import software.ulpgc.chess.application.domain.model.*;
 import software.ulpgc.chess.backend.infrastructure.adapters.*;
-import software.ulpgc.chess.backend.application.ports.RoomRepository;
-import software.ulpgc.chess.backend.application.usecases.*;
-import software.ulpgc.chess.backend.infrastructure.http.*;
+import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
+import software.ulpgc.chess.gameservice.application.usecases.*;
+import software.ulpgc.chess.gameservice.infrastructure.adapters.*;
+import software.ulpgc.chess.gameservice.infrastructure.http.*;
 
 import java.net.*;
 import java.net.http.*;
@@ -24,6 +25,8 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class RoomHttpIntegrationTest {
     private RoomHttpServer server;
+    private GameHttpServer gameServer;
+    private GameServiceProxy proxy;
     private GetRoomUseCase rooms;
     private final HttpClient white = browser();
     private final HttpClient black = browser();
@@ -41,12 +44,17 @@ class RoomHttpIntegrationTest {
         RoomApiHandler api = new RoomApiHandler(new CreateRoomUseCase(repository), rooms,
                 new EnterRoomUseCase(rooms, new JoinRoomUseCase(repository)),
                 new MoveUseCase(repository), sessions, new RoomJsonCodec());
-        server = new RoomHttpServer(0, api, new GameApiHandler(rooms, new RoomJsonCodec()), new StaticAssetHandler());
+        gameServer = new GameHttpServer(0, api, new GameApiHandler(rooms, new RoomJsonCodec()));
+        gameServer.start();
+        proxy = new GameServiceProxy(gameServer.uri());
+        server = new RoomHttpServer(0, proxy, new StaticAssetHandler());
         server.start();
     }
 
     @AfterEach void stop() {
         if (server != null) server.close();
+        if (proxy != null) proxy.close();
+        if (gameServer != null) gameServer.close();
     }
 
     private static HttpClient browser() {
@@ -108,6 +116,21 @@ class RoomHttpIntegrationTest {
         assertEquals(404, get(white, "/assets/pieces/white-dragon.svg").statusCode());
         assertEquals(404, get(white, "/unknown").statusCode());
         assertEquals(405, get(white, "/api/action").statusCode());
+    }
+
+    @Test void gameServiceCanRunIndependentlyAndItsFailureIsReportedByTheWebServer() throws Exception {
+        var direct = white.send(HttpRequest.newBuilder(gameServer.uri().resolve("/api/state")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, direct.statusCode());
+        assertEquals(32, data(direct).getAsJsonObject("pieces").size());
+        var service = gameServer;
+        gameServer = null;
+        service.close();
+
+        var unavailable = get(white, "/api/state");
+        assertEquals(503, unavailable.statusCode());
+        assertEquals("Game service is unavailable. Try again shortly.", data(unavailable).get("message").getAsString());
+        assertEquals(200, get(white, "/").statusCode());
     }
 
     @Test void twoBrowserSessionsCreateJoinMoveAndRefreshOnOneServer() throws Exception {

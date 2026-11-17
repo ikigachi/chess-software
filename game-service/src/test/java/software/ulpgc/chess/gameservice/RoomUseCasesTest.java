@@ -1,17 +1,17 @@
-package software.ulpgc.chess.backend;
+package software.ulpgc.chess.gameservice;
 
 import org.junit.jupiter.api.Test;
 import software.ulpgc.chess.application.domain.model.Color;
 import software.ulpgc.chess.application.domain.model.Move;
 import software.ulpgc.chess.application.domain.model.Room;
 import software.ulpgc.chess.application.domain.model.User;
-import software.ulpgc.chess.backend.application.ports.RoomRepository;
-import software.ulpgc.chess.backend.application.usecases.CreateRoomUseCase;
-import software.ulpgc.chess.backend.application.usecases.GetRoomUseCase;
-import software.ulpgc.chess.backend.application.usecases.JoinRoomUseCase;
-import software.ulpgc.chess.backend.application.usecases.EnterRoomUseCase;
-import software.ulpgc.chess.backend.application.usecases.MoveUseCase;
-import software.ulpgc.chess.backend.infrastructure.adapters.InMemoryRoomRepository;
+import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
+import software.ulpgc.chess.gameservice.application.usecases.CreateRoomUseCase;
+import software.ulpgc.chess.gameservice.application.usecases.GetRoomUseCase;
+import software.ulpgc.chess.gameservice.application.usecases.JoinRoomUseCase;
+import software.ulpgc.chess.gameservice.application.usecases.EnterRoomUseCase;
+import software.ulpgc.chess.gameservice.application.usecases.MoveUseCase;
+import software.ulpgc.chess.gameservice.infrastructure.adapters.InMemoryRoomRepository;
 
 import java.util.List;
 import java.util.Optional;

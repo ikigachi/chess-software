@@ -1,8 +1,8 @@
-package software.ulpgc.chess.backend;
+package software.ulpgc.chess.gameservice;
 
 import org.junit.jupiter.api.Test;
 import software.ulpgc.chess.application.domain.model.Move;
-import software.ulpgc.chess.backend.infrastructure.http.RoomActionRequest;
+import software.ulpgc.chess.gameservice.infrastructure.http.RoomActionRequest;
 
 import java.util.Map;
 

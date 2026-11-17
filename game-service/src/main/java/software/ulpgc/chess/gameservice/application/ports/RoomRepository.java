@@ -1,4 +1,4 @@
-package software.ulpgc.chess.backend.application.ports;
+package software.ulpgc.chess.gameservice.application.ports;
 
 import software.ulpgc.chess.application.domain.model.Room;
 

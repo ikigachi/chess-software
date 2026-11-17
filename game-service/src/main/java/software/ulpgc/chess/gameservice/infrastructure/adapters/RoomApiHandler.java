@@ -1,10 +1,10 @@
-package software.ulpgc.chess.backend.infrastructure.adapters;
+package software.ulpgc.chess.gameservice.infrastructure.adapters;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import software.ulpgc.chess.application.domain.model.*;
-import software.ulpgc.chess.backend.application.usecases.*;
-import software.ulpgc.chess.backend.infrastructure.http.*;
+import software.ulpgc.chess.gameservice.application.usecases.*;
+import software.ulpgc.chess.gameservice.infrastructure.http.*;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

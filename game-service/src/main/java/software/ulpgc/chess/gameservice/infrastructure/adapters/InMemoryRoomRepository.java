@@ -1,7 +1,7 @@
-package software.ulpgc.chess.backend.infrastructure.adapters;
+package software.ulpgc.chess.gameservice.infrastructure.adapters;
 
 import software.ulpgc.chess.application.domain.model.Room;
-import software.ulpgc.chess.backend.application.ports.RoomRepository;
+import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
 
 import java.util.HashMap;
 import java.util.Map;

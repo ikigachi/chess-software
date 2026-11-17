@@ -1,4 +1,4 @@
-package software.ulpgc.chess.backend.application.usecases;
+package software.ulpgc.chess.gameservice.application.usecases;
 
 import software.ulpgc.chess.application.domain.model.Room;
 import software.ulpgc.chess.application.domain.model.User;

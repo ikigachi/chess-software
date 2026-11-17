@@ -1,11 +1,11 @@
-package software.ulpgc.chess.backend.infrastructure.adapters;
+package software.ulpgc.chess.gameservice.infrastructure.adapters;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
-import software.ulpgc.chess.backend.application.usecases.GetRoomUseCase;
-import software.ulpgc.chess.backend.infrastructure.http.ApiMessages;
-import software.ulpgc.chess.backend.infrastructure.http.HttpResponses;
-import software.ulpgc.chess.backend.infrastructure.http.RoomJsonCodec;
+import software.ulpgc.chess.gameservice.application.usecases.GetRoomUseCase;
+import software.ulpgc.chess.gameservice.infrastructure.http.ApiMessages;
+import software.ulpgc.chess.gameservice.infrastructure.http.HttpResponses;
+import software.ulpgc.chess.gameservice.infrastructure.http.RoomJsonCodec;
 
 import java.io.IOException;
 import java.util.Locale;

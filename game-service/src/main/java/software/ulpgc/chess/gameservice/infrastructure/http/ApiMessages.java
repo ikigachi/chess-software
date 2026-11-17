@@ -1,4 +1,4 @@
-package software.ulpgc.chess.backend.infrastructure.http;
+package software.ulpgc.chess.gameservice.infrastructure.http;
 
 import software.ulpgc.chess.application.domain.model.Room;
 

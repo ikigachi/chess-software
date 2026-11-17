@@ -1,6 +1,7 @@
 package software.ulpgc.chess.backend.infrastructure.adapters;
 
 import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.HttpHandler;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -13,14 +14,13 @@ public final class RoomHttpServer implements AutoCloseable {
     private final HttpServer server;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
-    public RoomHttpServer(int port, RoomApiHandler api, GameApiHandler games, StaticAssetHandler assets) throws IOException {
-        Objects.requireNonNull(api);
-        Objects.requireNonNull(games);
+    public RoomHttpServer(int port, HttpHandler proxy, StaticAssetHandler assets) throws IOException {
+        Objects.requireNonNull(proxy);
         Objects.requireNonNull(assets);
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
         server.setExecutor(executor);
-        server.createContext("/api/", api);
-        server.createContext("/games", games);
+        server.createContext("/api/", proxy);
+        server.createContext("/games", proxy);
         server.createContext("/", assets);
     }
 

@@ -1,8 +1,8 @@
-package software.ulpgc.chess.backend.application.usecases;
+package software.ulpgc.chess.gameservice.application.usecases;
 
 import software.ulpgc.chess.application.domain.model.Room;
 import software.ulpgc.chess.application.domain.model.User;
-import software.ulpgc.chess.backend.application.ports.RoomRepository;
+import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
 
 import java.util.Objects;
 import java.util.Locale;
