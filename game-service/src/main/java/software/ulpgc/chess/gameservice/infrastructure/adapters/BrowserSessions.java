@@ -2,14 +2,11 @@ package software.ulpgc.chess.gameservice.infrastructure.adapters;
 
 import io.javalin.http.Context;
 import software.ulpgc.chess.application.domain.model.User;
+import software.ulpgc.chess.gameservice.application.ports.PlayerIdentity;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -19,13 +16,15 @@ public final class BrowserSessions {
     private static final long PRESENCE_TIMEOUT = Duration.ofSeconds(15).toMillis();
 
     private final Map<String, Session> sessions = new HashMap<>();
+    private final PlayerIdentity players;
     private final Clock clock;
 
-    public BrowserSessions() {
-        this(Clock.systemUTC());
+    public BrowserSessions(PlayerIdentity players) {
+        this(players, Clock.systemUTC());
     }
 
-    public BrowserSessions(Clock clock) {
+    public BrowserSessions(PlayerIdentity players, Clock clock) {
+        this.players = Objects.requireNonNull(players);
         this.clock = Objects.requireNonNull(clock);
     }
 
@@ -43,7 +42,7 @@ public final class BrowserSessions {
         Session session = sessions.get(credential);
         if (session == null) {
             if (sessions.size() >= 512) throw new IllegalStateException("Too many local sessions");
-            session = new Session(playerId(credential));
+            session = new Session(players.resolve(credential));
             sessions.put(credential, session);
         }
         if (issueCookie) {
@@ -72,20 +71,11 @@ public final class BrowserSessions {
         }
     }
 
-    private static String playerId(String credential) {
-        try {
-            byte[] hash = MessageDigest.getInstance("SHA-256").digest(credential.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hash);
-        } catch (NoSuchAlgorithmException exception) {
-            throw new IllegalStateException("Could not derive the browser identity.", exception);
-        }
-    }
-
     static final class Session {
         final String token = UUID.randomUUID().toString();
         User user;
         String code;
         long lastSeen;
-        Session(String id) { user = new User(id, "Guest"); }
+        Session(User user) { this.user = Objects.requireNonNull(user); }
     }
 }

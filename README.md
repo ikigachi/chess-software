@@ -9,9 +9,9 @@ Build a chess application where two users connect through a shared room code, pl
 | Dependency | Version or use |
 | --- | --- |
 | JDK | 27 |
-| Maven | Builds the four modules and resolves dependencies |
+| Maven | Builds the five modules and resolves dependencies |
 | Gson | 2.14.0, backend JSON serialization |
-| Javalin | 7.2.4, web server and game-service HTTP routes |
+| Javalin | 7.2.4, HTTP servers |
 | SLF4J Simple | 2.0.20, server logging |
 | SQLite JDBC | 3.54.1.0, local game storage |
 | JUnit Jupiter | 5.11.4, automated tests only |
@@ -22,13 +22,14 @@ From the repository root:
 mvn compile
 ```
 
-In IntelliJ, open the root `pom.xml`, select JDK 27 and reload Maven. Use the repository root as the working directory for both run configurations.
+In IntelliJ, open the root `pom.xml`, select JDK 27 and reload Maven. Use the repository root as the working directory for all three run configurations.
 
-1. Run `software.ulpgc.chess.gameservice.Main` using the `game-service` module. It listens on `127.0.0.1:8081` and creates `.regalia/rooms.sqlite` on first launch.
-2. Run `software.ulpgc.chess.backend.Main` using the `chess-backend` module. It serves the frontend on `127.0.0.1:8080` and forwards API requests to the game service.
-3. Open [Regalia](http://127.0.0.1:8080) in the browser. Keep both programs running while playing.
+1. Run `software.ulpgc.chess.playerservice.Main` using the `player-service` module. It listens on `127.0.0.1:8082` and resolves stable guest-player identities.
+2. Run `software.ulpgc.chess.gameservice.Main` using the `game-service` module. It listens on `127.0.0.1:8081`, uses the player service and creates `.regalia/rooms.sqlite` on first launch.
+3. Run `software.ulpgc.chess.backend.Main` using the `chess-backend` module. It serves the frontend on `127.0.0.1:8080` and forwards API requests to the game service.
+4. Open [Regalia](http://127.0.0.1:8080) in the browser. Keep all three programs running while playing.
 
-For a different game-service port and database file, use program arguments such as `8091 .regalia/test.sqlite`. Configure the web server with its port and the matching service origin, such as `8090 http://127.0.0.1:8091`. SQLite files created by the previous single-server version remain compatible.
+For different ports, start the player service with `8092`, the game service with `8091 .regalia/test.sqlite http://127.0.0.1:8092`, and the web server with `8090 http://127.0.0.1:8091`. SQLite files and browser identities from the previous version remain compatible.
 
 ## Delivery structure and main classes
 
@@ -44,6 +45,14 @@ For a different game-service port and database file, use program arguments such 
 │       │   ├── application/ports/
 │       │   └── infrastructure/adapters/
 │       └── test/java/software/ulpgc/chess/application/domain/model/
+├── player-service/
+│   ├── pom.xml
+│   └── src/
+│       ├── main/java/software/ulpgc/chess/playerservice/
+│       │   ├── Main.java
+│       │   ├── application/usecases/
+│       │   └── infrastructure/adapters/
+│       └── test/java/software/ulpgc/chess/playerservice/
 ├── game-service/
 │   ├── pom.xml
 │   └── src/
@@ -75,7 +84,7 @@ For a different game-service port and database file, use program arguments such 
 └── docs/screenshots/
 ```
 
-`chess-core` defines the chess rules and data model and supports loading board positions from FEN. `game-service` executes room and game operations, manages sessions and stores matches. `chess-backend` serves the page and forwards HTTP requests. `chess-frontend` displays the board, players and move history and lets users interact with the game.
+`chess-core` defines the chess rules and data model and supports loading board positions from FEN. `player-service` resolves stable guest-player identities. `game-service` executes room and game operations, manages sessions and stores matches. `chess-backend` serves the page and forwards HTTP requests. `chess-frontend` displays the board, players and move history and lets users interact with the game.
 
 ## System architecture
 
@@ -83,16 +92,17 @@ For a different game-service port and database file, use program arguments such 
 flowchart LR
     F["Frontend in browser"] -->|"HTTP"| W["Web server: port 8080"]
     W -->|"HTTP proxy"| G["Game service: port 8081"]
+    G -->|"PlayerIdentity via HTTP/JSON"| P["Player service: port 8082"]
     G -->|"RoomRepository via JDBC"| D["SQLite database"]
 ```
 
-The browser uses the web server as its origin. The web server and game service use Javalin, run in separate Java processes and communicate through HTTP. The game service persists rooms in SQLite and manages active browser sessions in memory. Browser cookies let the original players reopen a saved room with its code after restarting the game service.
+The browser uses the web server as its origin. The web server, game service and player service run in separate Java processes using Javalin. When opening a session, the game service obtains its guest-player identity through the `PlayerIdentity` port and its HTTP adapter. The game service persists rooms in SQLite and manages active browser sessions in memory. Browser cookies let the original players reopen a saved room with its code after restarting the services.
 
-This is the first service extraction from the architecture discussed in class. Room coordination remains in `game-service` during this step. Separate player, matches, registration and authentication services, together with NGINX routing, are pending.
+Player identity resolution has been extracted. Display names, room coordination and browser sessions remain in `game-service` during this step. Matches, registration and authentication services, together with NGINX routing, are pending.
 
 ### Planned service boundaries
 
-This is the target for the next extractions. The current executable system remains the two processes described above.
+This is the target for the next extractions. The current executable system uses the three processes described above; player-service display-name management is still pending.
 
 | Component | Responsibility and data ownership |
 | --- | --- |
@@ -115,10 +125,12 @@ Services communicate through HTTP and JSON using application ports and infrastru
 | Domain | `chess-core`: `application/domain/model`, including `Room`, `Game`, `State`, `Board`, `User` and `Move` |
 | Use cases | `game-service/application/usecases`: `CreateRoomUseCase`, `GetRoomUseCase`, `JoinRoomUseCase`, `EnterRoomUseCase`, `MoveUseCase` |
 | Storage port | `game-service/application/ports/RoomRepository` |
+| Player identity port | `game-service/application/ports/PlayerIdentity`, implemented by `infrastructure/adapters/HttpPlayerIdentity` |
 | Storage adapter | `infrastructure/adapters/SqliteRoomRepository`, with `SqliteDatabase` for initialization and configured connections. Tests can use `InMemoryRoomRepository` |
 | Incoming HTTP adapters | `infrastructure/adapters/RoomApiHandler` and `GameApiHandler`, registered by `GameHttpServer` |
 | Transport support | `infrastructure/http`: `RoomActionRequest`, `RoomJsonCodec`, `ApiMessages`, `FormData`, `HttpResponses` |
 | Sessions | `infrastructure/adapters/BrowserSessions` |
+| Player service | `player-service/application/usecases/ResolvePlayerUseCase`, exposed by `infrastructure/adapters/PlayerApiHandler` and `PlayerHttpServer` |
 | Web entry point | `chess-backend` uses `GameServiceProxy` for HTTP forwarding and `StaticAssetHandler` for frontend resources |
 
 Game-service package paths are relative to `software/ulpgc/chess/gameservice`. Its `Main` connects the collaborators through constructors. Storage-facing use cases depend on `RoomRepository`, while `EnterRoomUseCase` composes lookup and joining. Domain rules do not depend on HTTP, JSON or storage implementations.
@@ -138,6 +150,10 @@ Game-service package paths are relative to `software/ulpgc/chess/gameservice`. I
 `app.js` handles browser events, square selection and rendering. `RoomActions` can run with a service double and without browser elements. The backend validates every submitted move.
 
 ## Communication contract
+
+The game service calls `POST /players/resolve` on the player-service origin with a JSON `credential` containing the browser's canonical UUID cookie value. The response contains `id` and `name`, currently `Guest`. The identifier preserves the previous SHA-256 mapping, so existing players keep their seats after the extraction. The player service stores no credentials or profiles in this step. Invalid credentials or JSON return `400`; unsupported methods, content types and oversized bodies return `405`, `415` and `413`. This is guest identity resolution; account authentication is pending.
+
+If the player service is unavailable, opening a new game-service session returns `503` without issuing a cookie or changing a game. Existing sessions can continue playing. The browser continues to communicate with the web server.
 
 `POST /games` creates a game from a JSON object containing `name` and the `token` obtained from `GET /api/state`. Send both requests with the same browser cookie. A successful response has status `201`, includes the game `id`, `room` and `pieces`, and provides its URL in the `Location` header. Invalid JSON or names return `400`, invalid tokens return `403`, oversized bodies return `413` and unsupported content types return `415`.
 
@@ -192,7 +208,7 @@ Run all automated checks from the repository root:
 mvn test
 ```
 
-The latest run passed 96 tests. The same repository contract tests run against SQLite and in-memory storage. Storage tests also check rejected writes, invalid move numbering and foreign-key enforcement on every connection. HTTP integration tests run the web server and game service separately, exercising Javalin routing, JSON game creation and moves, forwarded cookies, concurrent joining, game queries and actions. Move checks cover rejected requests, promotion and recovery after restarting SQLite storage. They also check that an unavailable game service produces `503` while the page remains accessible. To reproduce the restart check, play two moves, note the room code, restart the game service and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
+The latest run passed 103 tests. The same repository contract tests run against SQLite and in-memory storage. Storage tests also check rejected writes, invalid move numbering and foreign-key enforcement on every connection. HTTP integration tests run the web server, game service and player service separately, exercising Javalin routing, JSON game creation and moves, forwarded cookies, concurrent joining, game queries and actions. Player checks cover compatible identities, invalid service responses and a player-service outage while existing players continue. Move checks cover rejected requests, promotion and recovery after restarting SQLite storage. An unavailable game service produces `503` while the page remains accessible. To reproduce the restart check, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 
@@ -214,4 +230,4 @@ console.log((await actions.perform('create', { name: 'Alice' })).room.code);
 ```
 
 
-Browser verification with two independent sessions confirmed JSON creation and moves, recovery after an invalid move, automatic synchronization, leaving and rejoining, and promotion to a knight. In browser developer tools, the Network panel should show `POST /games` when creating a room and `PUT /games/{id}` when moving, both with JSON bodies. A selected piece remains selected across unchanged state checks.
+Browser verification with two independent sessions confirmed JSON creation and moves, recovery after an invalid move, automatic synchronization, leaving and rejoining, and promotion to a knight. The three `Main` classes were also run as independent processes: both players retained their identities and continued a saved game after all processes restarted. In browser developer tools, the Network panel should show `POST /games` when creating a room and `PUT /games/{id}` when moving, both with JSON bodies. A selected piece remains selected across unchanged state checks.

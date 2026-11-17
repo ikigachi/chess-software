@@ -1,0 +1,41 @@
+package software.ulpgc.chess.playerservice.infrastructure.adapters;
+
+import com.google.gson.JsonParseException;
+import io.javalin.Javalin;
+import io.javalin.http.MethodNotAllowedResponse;
+import io.javalin.http.NotFoundResponse;
+
+import java.net.URI;
+import java.util.Objects;
+
+public final class PlayerHttpServer implements AutoCloseable {
+    private final Javalin server;
+    private final int port;
+
+    public PlayerHttpServer(int port, PlayerApiHandler players) {
+        Objects.requireNonNull(players);
+        this.port = port;
+        server = Javalin.create(config -> {
+            config.http.prefer405over404 = true;
+            config.router.ignoreTrailingSlashes = false;
+            config.routes.post("/players/resolve", players::resolve);
+            config.routes.exception(JsonParseException.class, (exception, context) ->
+                    players.error(context, 400, "Invalid JSON request."));
+            config.routes.exception(IllegalArgumentException.class, (exception, context) ->
+                    players.error(context, 400, "Invalid player credential."));
+            config.routes.exception(NotFoundResponse.class, (exception, context) ->
+                    players.error(context, 404, "Not found"));
+            config.routes.exception(MethodNotAllowedResponse.class, (exception, context) -> {
+                context.header("Allow", "POST");
+                players.error(context, 405, "Method not allowed");
+            });
+            config.routes.exception(Exception.class, (exception, context) ->
+                    players.error(context, 500, "Could not resolve the player identity."));
+        });
+    }
+
+    public void start() { server.start("127.0.0.1", port); }
+    public URI uri() { return URI.create("http://127.0.0.1:" + server.port()); }
+
+    @Override public void close() { server.stop(); }
+}

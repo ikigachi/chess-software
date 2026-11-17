@@ -12,11 +12,15 @@ import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
 import software.ulpgc.chess.gameservice.application.usecases.*;
 import software.ulpgc.chess.gameservice.infrastructure.adapters.*;
 import software.ulpgc.chess.gameservice.infrastructure.http.*;
+import software.ulpgc.chess.playerservice.application.usecases.ResolvePlayerUseCase;
+import software.ulpgc.chess.playerservice.infrastructure.adapters.PlayerApiHandler;
+import software.ulpgc.chess.playerservice.infrastructure.adapters.PlayerHttpServer;
 
 import java.net.*;
 import java.net.http.*;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.time.Clock;
 import java.time.InstantSource;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -30,6 +34,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class RoomHttpIntegrationTest {
     private RoomHttpServer server;
     private GameHttpServer gameServer;
+    private PlayerHttpServer playerServer;
+    private HttpPlayerIdentity playerIdentity;
     private GameServiceProxy proxy;
     private GetRoomUseCase rooms;
     private final HttpClient white = browser();
@@ -40,10 +46,14 @@ class RoomHttpIntegrationTest {
     }
 
     private void start(RoomRepository repository) throws Exception {
-        start(repository, new BrowserSessions());
+        start(repository, Clock.systemUTC());
     }
 
-    private void start(RoomRepository repository, BrowserSessions sessions) throws Exception {
+    private void start(RoomRepository repository, Clock clock) throws Exception {
+        playerServer = new PlayerHttpServer(0, new PlayerApiHandler(new ResolvePlayerUseCase()));
+        playerServer.start();
+        playerIdentity = new HttpPlayerIdentity(playerServer.uri());
+        BrowserSessions sessions = new BrowserSessions(playerIdentity, clock);
         rooms = new GetRoomUseCase(repository);
         RoomApiHandler api = new RoomApiHandler(new CreateRoomUseCase(repository), rooms,
                 new EnterRoomUseCase(rooms, new JoinRoomUseCase(repository)),
@@ -60,6 +70,8 @@ class RoomHttpIntegrationTest {
         if (server != null) server.close();
         if (proxy != null) proxy.close();
         if (gameServer != null) gameServer.close();
+        if (playerIdentity != null) playerIdentity.close();
+        if (playerServer != null) playerServer.close();
     }
 
     private static HttpClient browser() {
@@ -163,7 +175,33 @@ class RoomHttpIntegrationTest {
         assertEquals(200, get(white, "/").statusCode());
     }
 
-    @Test void twoBrowserSessionsCreateJoinMoveAndRefreshOnOneServer() throws Exception {
+    @Test void aPlayerServiceOutageRejectsNewSessionsButPreservesExistingPlayersAndGames() throws Exception {
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        String code = data(createGame(white, whiteToken, "Alice")).get("id").getAsString();
+        assertEquals(200, post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", code)).statusCode());
+        Room saved = rooms.execute(code);
+        int playerPort = playerServer.uri().getPort();
+        playerServer.close();
+
+        HttpClient newcomer = browser();
+        var rejected = get(newcomer, "/api/state");
+        assertEquals(503, rejected.statusCode());
+        assertTrue(rejected.headers().firstValue("Set-Cookie").isEmpty());
+        assertTrue(data(rejected).get("token").isJsonNull());
+        assertSame(saved, rooms.execute(code));
+        assertEquals(200, putGame(white, code, Map.of("token", whiteToken, "from", "e2", "to", "e4")).statusCode());
+        assertEquals(200, putGame(black, code, Map.of("token", blackToken, "from", "e7", "to", "e5")).statusCode());
+        assertEquals(2, rooms.execute(code).game().moves().size());
+
+        playerServer = new PlayerHttpServer(playerPort, new PlayerApiHandler(new ResolvePlayerUseCase()));
+        playerServer.start();
+
+        assertEquals(200, get(newcomer, "/api/state").statusCode());
+        assertEquals(2, data(get(white, "/api/state")).getAsJsonObject("room").getAsJsonArray("moves").size());
+    }
+
+    @Test void twoBrowserSessionsCreateJoinMoveAndRefresh() throws Exception {
         String whiteToken = token(white);
         String blackToken = token(black);
         var created = data(post(white, Map.of("token", whiteToken, "action", "create", "name", "Alice")));
@@ -473,7 +511,7 @@ class RoomHttpIntegrationTest {
         AtomicLong elapsed = new AtomicLong();
         InstantSource time = () -> Instant.ofEpochMilli(elapsed.get());
         stop();
-        start(new InMemoryRoomRepository(), new BrowserSessions(time.withZone(ZoneOffset.UTC)));
+        start(new InMemoryRoomRepository(), time.withZone(ZoneOffset.UTC));
         String whiteToken = token(white);
         String blackToken = token(black);
         var created = data(post(white, Map.of("token", whiteToken, "action", "create", "name", "Alice")));

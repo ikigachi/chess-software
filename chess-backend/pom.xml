@@ -14,6 +14,12 @@
 
     <dependencies>
         <dependency>
+            <groupId>software.ulpgc</groupId>
+            <artifactId>player-service</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>io.javalin</groupId>
             <artifactId>javalin</artifactId>
             <version>7.2.4</version>
