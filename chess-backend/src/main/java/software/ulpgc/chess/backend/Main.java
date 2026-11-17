@@ -14,10 +14,11 @@ public class Main {
         RoomRepository repository = new SqliteRoomRepository(database);
         GetRoomUseCase get = new GetRoomUseCase(repository);
         EnterRoomUseCase enter = new EnterRoomUseCase(get, new JoinRoomUseCase(repository));
+        RoomJsonCodec codec = new RoomJsonCodec();
         RoomApiHandler api = new RoomApiHandler(new CreateRoomUseCase(repository),
                 get, enter,
-                new MoveUseCase(repository), new BrowserSessions(), new RoomJsonCodec());
-        RoomHttpServer server = new RoomHttpServer(port, api, new StaticAssetHandler());
+                new MoveUseCase(repository), new BrowserSessions(), codec);
+        RoomHttpServer server = new RoomHttpServer(port, api, new GameApiHandler(get, codec), new StaticAssetHandler());
         Runtime.getRuntime().addShutdownHook(new Thread(server::close));
         server.start();
         System.out.println("Regalia: " + server.uri());

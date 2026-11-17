@@ -41,7 +41,7 @@ class RoomHttpIntegrationTest {
         RoomApiHandler api = new RoomApiHandler(new CreateRoomUseCase(repository), rooms,
                 new EnterRoomUseCase(rooms, new JoinRoomUseCase(repository)),
                 new MoveUseCase(repository), sessions, new RoomJsonCodec());
-        server = new RoomHttpServer(0, api, new StaticAssetHandler());
+        server = new RoomHttpServer(0, api, new GameApiHandler(rooms, new RoomJsonCodec()), new StaticAssetHandler());
         server.start();
     }
 
@@ -163,6 +163,41 @@ class RoomHttpIntegrationTest {
         assertNotNull(rooms.execute(created.getAsJsonObject("room").get("code").getAsString()));
     }
 
+    @Test void retrievesAGameByIdWithoutJoiningOrChangingTheViewersRoom() throws Exception {
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        var created = data(post(white, Map.of("token", whiteToken, "action", "create", "name", "Alice")));
+        String code = created.getAsJsonObject("room").get("code").getAsString();
+        assertEquals(200, post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", code)).statusCode());
+        var played = data(move(white, whiteToken, "e2", "e4"));
+        Room original = rooms.execute(code);
+        HttpClient viewer = browser();
+
+        var response = get(viewer, "/games/" + code.toLowerCase(java.util.Locale.ROOT));
+        assertEquals(200, response.statusCode());
+        var game = data(response);
+        assertEquals(code, game.get("id").getAsString());
+        assertEquals(played.get("room"), game.get("room"));
+        assertEquals(played.get("pieces"), game.get("pieces"));
+        assertFalse(game.has("token"));
+        assertTrue(response.headers().firstValue("Set-Cookie").isEmpty());
+        assertTrue(data(get(viewer, "/api/state")).get("room").isJsonNull());
+        assertSame(original, rooms.execute(code));
+    }
+
+    @Test void rejectsMissingGamesUnsupportedMethodsAndInvalidGameRoutes() throws Exception {
+        var missing = get(white, "/games/MISSING");
+        assertEquals(404, missing.statusCode());
+        assertEquals("Game not found.", data(missing).get("message").getAsString());
+        for (String path : List.of("/games", "/games/", "/games/ABC123/moves", "/gamesABC123")) {
+            assertEquals(404, get(white, path).statusCode(), path);
+        }
+        var unsupported = white.send(HttpRequest.newBuilder(server.uri().resolve("/games/ABC123"))
+                .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
+        assertEquals(405, unsupported.statusCode());
+        assertEquals("GET", unsupported.headers().firstValue("Allow").orElseThrow());
+    }
+
     @Test void bothPlayersCanReopenAndContinueAfterRestart(@TempDir Path directory) throws Exception {
         Path database = directory.resolve("rooms.sqlite");
         stop();
@@ -177,6 +212,10 @@ class RoomHttpIntegrationTest {
         stop();
         start(new SqliteRoomRepository(database));
 
+        var savedGame = get(browser(), "/games/" + code);
+        assertEquals(200, savedGame.statusCode());
+        assertEquals(beforeRestart.get("room"), data(savedGame).get("room"));
+        assertEquals(beforeRestart.get("pieces"), data(savedGame).get("pieces"));
         String newWhiteToken = token(white);
         String newBlackToken = token(black);
         assertNotEquals(whiteToken, newWhiteToken);

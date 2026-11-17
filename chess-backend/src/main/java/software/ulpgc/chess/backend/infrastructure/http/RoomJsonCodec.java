@@ -14,10 +14,18 @@ public final class RoomJsonCodec {
 
     public String snapshot(Room room, User viewer, String token, String message, boolean whiteConnected, boolean blackConnected) {
         Board board = room == null ? Board.initial() : room.game().state().board();
+        PresenceView presence = room == null ? null : new PresenceView(whiteConnected, blackConnected);
+        return gson.toJson(new Snapshot(user(viewer), roomView(room), pieces(board), presence, token, message));
+    }
+
+    public String game(Room room) {
+        return gson.toJson(new GameSnapshot(room.game().id(), roomView(room), pieces(room.game().state().board())));
+    }
+
+    private Map<String, String> pieces(Board board) {
         Map<String, String> pieces = new LinkedHashMap<>();
         board.pieces().forEach((square, piece) -> pieces.put(square.coordinate(), piece.name()));
-        PresenceView presence = room == null ? null : new PresenceView(whiteConnected, blackConnected);
-        return gson.toJson(new Snapshot(user(viewer), roomView(room), pieces, presence, token, message));
+        return pieces;
     }
 
     public String error(String message, String token) {
@@ -43,6 +51,7 @@ public final class RoomJsonCodec {
 
     private record Snapshot(UserView viewer, RoomView room, Map<String, String> pieces, PresenceView presence,
                             String token, String message) {}
+    private record GameSnapshot(String id, RoomView room, Map<String, String> pieces) {}
     private record PresenceView(boolean whiteConnected, boolean blackConnected) {}
     private record UserView(String id, String name) {}
     private record RoomView(String code, String turn, boolean inCheck, String winner, boolean stalemate,

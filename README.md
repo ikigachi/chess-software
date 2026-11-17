@@ -82,7 +82,7 @@ The frontend and backend share one origin. The backend persists rooms in SQLite 
 | Use cases | `chess-backend/application/usecases`: `CreateRoomUseCase`, `GetRoomUseCase`, `JoinRoomUseCase`, `EnterRoomUseCase`, `MoveUseCase` |
 | Storage port | `chess-backend/application/ports/RoomRepository` |
 | Storage adapter | `infrastructure/adapters/SqliteRoomRepository`. Tests can use `InMemoryRoomRepository` |
-| Incoming HTTP adapter | `infrastructure/adapters/RoomApiHandler`, registered by `RoomHttpServer` |
+| Incoming HTTP adapters | `infrastructure/adapters/RoomApiHandler` and `GameApiHandler`, registered by `RoomHttpServer` |
 | Transport support | `infrastructure/http`: `RoomActionRequest`, `RoomJsonCodec`, `ApiMessages`, `FormData`, `HttpResponses` |
 | Session and asset adapters | `infrastructure/adapters/BrowserSessions`, `StaticAssetHandler` |
 
@@ -101,6 +101,8 @@ Package paths in the backend are relative to `software/ulpgc/chess/backend`. `Ma
 `app.js` handles browser events, square selection and rendering. `RoomActions` can run with a service double and without browser elements. The backend validates every submitted move.
 
 ## Communication contract
+
+`GET /games/{id}` returns the stored game identifier, a `room` object with players, turn, result and move history, and the `pieces` map. The current application uses the room code as the game identifier. Anyone with the code can consult this read-only endpoint. For example, open `http://127.0.0.1:8080/games/ABC123` with an existing room code. A missing game returns `404`. Methods other than `GET` return `405`. This is the first game route introduced from the service architecture discussed in class.
 
 The frontend uses `GET /api/state` to retrieve the game state and `POST /api/action` to create or join a room, move, refresh or leave. Requests use form fields. JSON responses contain the players, board, turn and history, or an error message. The `presence` object reports `whiteConnected` and `blackConnected` while viewing a room. `room.inCheck` indicates that the player to move is in check. `room.winner` contains `White` or `Black` after checkmate and is otherwise `null`. `room.stalemate` is `true` after a draw by stalemate. A move can include a `promotion` choice of `queen`, `rook`, `bishop` or `knight`. Supplied choices appear in the move history. The server defaults to a queen when a pawn promotes without a choice.
 
@@ -149,7 +151,7 @@ Run all automated checks from the repository root:
 mvn test
 ```
 
-The latest run passed 83 tests. The same repository contract tests run against SQLite and in-memory storage. The SQLite tests also cover a database path that fails to open, rollback after a write failure and reopening a saved game after restart. To reproduce the restart check, play two moves, note the room code, restart the backend and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
+The latest run passed 85 tests. The same repository contract tests run against SQLite and in-memory storage. The SQLite tests cover an invalid database path, rollback after a write failure and reopening a saved game after restart. HTTP tests check direct game queries, missing games and unsupported methods. To reproduce the restart check, play two moves, note the room code, restart the backend and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 

@@ -13,12 +13,14 @@ public final class RoomHttpServer implements AutoCloseable {
     private final HttpServer server;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
-    public RoomHttpServer(int port, RoomApiHandler api, StaticAssetHandler assets) throws IOException {
+    public RoomHttpServer(int port, RoomApiHandler api, GameApiHandler games, StaticAssetHandler assets) throws IOException {
         Objects.requireNonNull(api);
+        Objects.requireNonNull(games);
         Objects.requireNonNull(assets);
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
         server.setExecutor(executor);
         server.createContext("/api/", api);
+        server.createContext("/games", games);
         server.createContext("/", assets);
     }
 
