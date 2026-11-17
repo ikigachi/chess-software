@@ -21,8 +21,12 @@ public record RoomActionRequest(String action, String name, String code, Move mo
     public static RoomActionRequest from(Map<String, String> fields) {
         String action = fields.getOrDefault("action", "");
         Move move = "move".equals(action)
-                ? new Move(Square.at(fields.get("from")), Square.at(fields.get("to")), promotion(fields.get("promotion"))) : null;
+                ? parseMove(fields.get("from"), fields.get("to"), fields.get("promotion")) : null;
         return new RoomActionRequest(action, fields.get("name"), fields.get("code"), move);
+    }
+
+    public static Move parseMove(String from, String to, String promotion) {
+        return new Move(Square.at(from), Square.at(to), promotion(promotion));
     }
 
     private static Promotion promotion(String value) {

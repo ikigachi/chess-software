@@ -62,7 +62,7 @@ function choosePromotion() {
 }
 
 async function submitMove(from, to, perform) {
-  const fields = { from, to };
+  const fields = { from, to, code: snapshot.room.code };
   if (needsPromotion(from, to)) {
     const promotion = await choosePromotion();
     if (!promotion || selected !== from) return;
@@ -186,7 +186,7 @@ async function performAction(actions, action, fields) {
     render();
     if (action === 'create' || action === 'leave') showPanel('room');
     if (action === 'join') showPanel('moves');
-    notify(positionMessage(snapshot.room) || snapshot.message);
+    notify(positionMessage(snapshot.room) || actionMessage(action, fields));
   } catch (error) {
     notify(error.message, true);
     const recovered = await actions.recoverAfter(action);
@@ -196,6 +196,12 @@ async function performAction(actions, action, fields) {
       render();
     }
   } finally { setBusy(false); }
+}
+
+function actionMessage(action, fields) {
+  if (action === 'create') return `Room created. Share code ${snapshot.room.code} with your opponent.`;
+  if (action === 'move') return `Move recorded: ${fields.from} → ${fields.to}.`;
+  return snapshot.message;
 }
 
 async function syncState(actions) {

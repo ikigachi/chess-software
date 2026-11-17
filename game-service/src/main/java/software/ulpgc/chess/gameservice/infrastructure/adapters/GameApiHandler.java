@@ -5,6 +5,7 @@ import software.ulpgc.chess.application.domain.model.Room;
 import software.ulpgc.chess.application.domain.model.User;
 import software.ulpgc.chess.gameservice.application.usecases.CreateRoomUseCase;
 import software.ulpgc.chess.gameservice.application.usecases.GetRoomUseCase;
+import software.ulpgc.chess.gameservice.application.usecases.MoveUseCase;
 import software.ulpgc.chess.gameservice.infrastructure.http.ApiMessages;
 import software.ulpgc.chess.gameservice.infrastructure.http.HttpResponses;
 import software.ulpgc.chess.gameservice.infrastructure.http.RoomJsonCodec;
@@ -18,12 +19,15 @@ import java.util.Objects;
 public final class GameApiHandler {
     private final CreateRoomUseCase create;
     private final GetRoomUseCase get;
+    private final MoveUseCase move;
     private final BrowserSessions sessions;
     private final RoomJsonCodec codec;
 
-    public GameApiHandler(CreateRoomUseCase create, GetRoomUseCase get, BrowserSessions sessions, RoomJsonCodec codec) {
+    public GameApiHandler(CreateRoomUseCase create, GetRoomUseCase get, MoveUseCase move,
+                          BrowserSessions sessions, RoomJsonCodec codec) {
         this.create = Objects.requireNonNull(create);
         this.get = Objects.requireNonNull(get);
+        this.move = Objects.requireNonNull(move);
         this.sessions = Objects.requireNonNull(sessions);
         this.codec = Objects.requireNonNull(codec);
     }
@@ -41,17 +45,9 @@ public final class GameApiHandler {
     }
 
     public void create(Context context) throws IOException {
-        String contentType = context.header("Content-Type");
-        if (contentType == null || !contentType.split(";", 2)[0].strip().equalsIgnoreCase("application/json")) {
-            error(context, 415, "Expected application/json.");
-            return;
-        }
-        byte[] body = context.bodyInputStream().readNBytes(8193);
-        if (body.length > 8192) {
-            error(context, 413, ApiMessages.REQUEST_TOO_LARGE);
-            return;
-        }
-        var request = codec.createRequest(new String(body, StandardCharsets.UTF_8));
+        String body = jsonBody(context);
+        if (body == null) return;
+        var request = codec.createRequest(body);
         var session = sessions.get(context);
         if (!session.token.equals(request.token())) {
             error(context, 403, ApiMessages.INVALID_TOKEN);
@@ -64,6 +60,42 @@ public final class GameApiHandler {
         session.code = room.code();
         context.header("Location", "/games/" + room.game().id());
         HttpResponses.json(context, 201, codec.game(room));
+    }
+
+    public void move(Context context) throws IOException {
+        String body = jsonBody(context);
+        if (body == null) return;
+        var request = codec.moveRequest(body);
+        var session = sessions.get(context);
+        if (!session.token.equals(request.token())) {
+            error(context, 403, ApiMessages.INVALID_TOKEN);
+            return;
+        }
+        String code = context.pathParam("id").toUpperCase(Locale.ROOT);
+        Room room;
+        try {
+            room = move.execute(code, session.user,
+                    RoomActionRequest.parseMove(request.from(), request.to(), request.promotion()));
+        } catch (IllegalArgumentException exception) {
+            if (!exception.getMessage().startsWith("Room not found:")) throw exception;
+            error(context, 404, "Game not found.");
+            return;
+        }
+        HttpResponses.json(context, 200, codec.game(room));
+    }
+
+    private String jsonBody(Context context) throws IOException {
+        String contentType = context.header("Content-Type");
+        if (contentType == null || !contentType.split(";", 2)[0].strip().equalsIgnoreCase("application/json")) {
+            error(context, 415, "Expected application/json.");
+            return null;
+        }
+        byte[] body = context.bodyInputStream().readNBytes(8193);
+        if (body.length > 8192) {
+            error(context, 413, ApiMessages.REQUEST_TOO_LARGE);
+            return null;
+        }
+        return new String(body, StandardCharsets.UTF_8);
     }
 
     public void error(Context context, int status, String message) {

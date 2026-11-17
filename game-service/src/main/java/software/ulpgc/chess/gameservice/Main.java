@@ -17,11 +17,12 @@ public class Main {
         EnterRoomUseCase enter = new EnterRoomUseCase(get, new JoinRoomUseCase(repository));
         RoomJsonCodec codec = new RoomJsonCodec();
         CreateRoomUseCase create = new CreateRoomUseCase(repository);
+        MoveUseCase move = new MoveUseCase(repository);
         BrowserSessions sessions = new BrowserSessions();
         RoomApiHandler api = new RoomApiHandler(create,
                 get, enter,
-                new MoveUseCase(repository), sessions, codec);
-        GameHttpServer server = new GameHttpServer(port, api, new GameApiHandler(create, get, sessions, codec));
+                move, sessions, codec);
+        GameHttpServer server = new GameHttpServer(port, api, new GameApiHandler(create, get, move, sessions, codec));
         Runtime.getRuntime().addShutdownHook(new Thread(server::close));
         server.start();
         System.out.println("Game service: " + server.uri());

@@ -16,10 +16,21 @@ public final class RoomJsonCodec {
     private final Gson gson = new GsonBuilder().serializeNulls().setStrictness(Strictness.STRICT).create();
 
     public CreateRequest createRequest(String json) {
+        JsonObject fields = object(json);
+        return new CreateRequest(string(fields, "name"), string(fields, "token"));
+    }
+
+    public MoveRequest moveRequest(String json) {
+        JsonObject fields = object(json);
+        return new MoveRequest(string(fields, "from"), string(fields, "to"),
+                string(fields, "promotion"), string(fields, "token"));
+    }
+
+    private JsonObject object(String json) {
         try {
             JsonObject fields = gson.fromJson(json, JsonObject.class);
             if (fields == null) throw new IllegalArgumentException("Expected a JSON object.");
-            return new CreateRequest(string(fields, "name"), string(fields, "token"));
+            return fields;
         } catch (JsonParseException exception) {
             throw new IllegalArgumentException("Invalid JSON request.", exception);
         }
@@ -34,6 +45,7 @@ public final class RoomJsonCodec {
     }
 
     public record CreateRequest(String name, String token) {}
+    public record MoveRequest(String from, String to, String promotion, String token) {}
 
     public String snapshot(Room room, User viewer, String token, String message, boolean whiteConnected, boolean blackConnected) {
         Board board = room == null ? Board.initial() : room.game().state().board();

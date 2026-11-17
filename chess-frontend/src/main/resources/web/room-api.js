@@ -7,6 +7,18 @@ export class RoomApi {
 
   async action(action, fields = {}) {
     if (!this.#token) await this.state();
+    if (action === 'move' && !fields.code) throw new Error('Enter the room code.');
+    if (action === 'create' || action === 'move') {
+      const path = action === 'create' ? '/games' : `/games/${encodeURIComponent(fields.code)}`;
+      const body = action === 'create' ? { name: fields.name }
+        : { from: fields.from, to: fields.to, promotion: fields.promotion };
+      await this.#request(path, {
+        method: action === 'create' ? 'POST' : 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...body, token: this.#token })
+      });
+      return this.state();
+    }
     return this.#request('/api/action', {
       method: 'POST',
       body: new URLSearchParams({ ...fields, action, token: this.#token })

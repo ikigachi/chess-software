@@ -27,11 +27,13 @@ public final class GameHttpServer implements AutoCloseable {
             config.routes.get("/api/state", rooms);
             config.routes.post("/api/action", rooms);
             config.routes.get("/games/{id}", games::retrieve);
+            config.routes.put("/games/{id}", games::move);
             config.routes.post("/games", games::create);
             config.routes.exception(NotFoundResponse.class, (exception, context) ->
                     games.error(context, 404, ApiMessages.NOT_FOUND));
             config.routes.exception(MethodNotAllowedResponse.class, (exception, context) -> {
                 String allowed = context.path().equals("/games") || context.path().equals("/api/action") ? "POST" : "GET";
+                if (context.path().startsWith("/games/")) allowed = "GET, PUT";
                 context.header("Allow", allowed);
                 games.error(context, 405, ApiMessages.METHOD_NOT_ALLOWED);
             });

@@ -4,6 +4,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import software.ulpgc.chess.application.domain.model.*;
 import software.ulpgc.chess.backend.infrastructure.adapters.*;
 import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
@@ -47,7 +49,7 @@ class RoomHttpIntegrationTest {
                 new EnterRoomUseCase(rooms, new JoinRoomUseCase(repository)),
                 new MoveUseCase(repository), sessions, new RoomJsonCodec());
         gameServer = new GameHttpServer(0, api,
-                new GameApiHandler(new CreateRoomUseCase(repository), rooms, sessions, new RoomJsonCodec()));
+                new GameApiHandler(new CreateRoomUseCase(repository), rooms, new MoveUseCase(repository), sessions, new RoomJsonCodec()));
         gameServer.start();
         proxy = new GameServiceProxy(gameServer.uri());
         server = new RoomHttpServer(0, proxy, new StaticAssetHandler());
@@ -99,6 +101,17 @@ class RoomHttpIntegrationTest {
         request.addProperty("name", name);
         request.addProperty("token", token);
         return postGame(client, request.toString());
+    }
+
+    private HttpResponse<String> putGame(HttpClient client, String code, Map<String, String> fields) throws Exception {
+        JsonObject request = new JsonObject();
+        fields.forEach(request::addProperty);
+        return putGame(client, server.uri().resolve("/games/" + code), request.toString());
+    }
+
+    private HttpResponse<String> putGame(HttpClient client, URI uri, String json) throws Exception {
+        return client.send(HttpRequest.newBuilder(uri).header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(json)).build(), HttpResponse.BodyHandlers.ofString());
     }
 
     @Test void servesStaticMarkupJavascriptAndAllPieceAssets() throws Exception {
@@ -278,7 +291,86 @@ class RoomHttpIntegrationTest {
         var unsupported = white.send(HttpRequest.newBuilder(server.uri().resolve("/games/ABC123"))
                 .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
         assertEquals(405, unsupported.statusCode());
-        assertEquals("GET", unsupported.headers().firstValue("Allow").orElseThrow());
+        assertEquals("GET, PUT", unsupported.headers().firstValue("Allow").orElseThrow());
+    }
+
+    @Test void recordsJsonMovesThroughTheWebServerAndTheIndependentGameService() throws Exception {
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        String code = data(createGame(white, whiteToken, "Alice")).get("id").getAsString();
+        assertEquals(200, post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", code)).statusCode());
+
+        var response = putGame(white, code.toLowerCase(java.util.Locale.ROOT),
+                Map.of("token", whiteToken, "from", "e2", "to", "e4"));
+        assertEquals(200, response.statusCode());
+        var first = data(response);
+        assertEquals(code, first.get("id").getAsString());
+        assertEquals("WhitePawn", first.getAsJsonObject("pieces").get("e4").getAsString());
+        assertFalse(first.getAsJsonObject("pieces").has("e2"));
+        assertEquals("Black", first.getAsJsonObject("room").get("turn").getAsString());
+        assertEquals(first, data(get(black, "/games/" + code)));
+
+        JsonObject reply = new JsonObject();
+        reply.addProperty("token", blackToken);
+        reply.addProperty("from", "e7");
+        reply.addProperty("to", "e5");
+        var direct = putGame(black, gameServer.uri().resolve("/games/" + code), reply.toString());
+        assertEquals(200, direct.statusCode());
+        var played = data(direct);
+        assertEquals("White", played.getAsJsonObject("room").get("turn").getAsString());
+        assertEquals(2, played.getAsJsonObject("room").getAsJsonArray("moves").size());
+        assertEquals(played, data(get(white, "/games/" + code)));
+        for (HttpClient player : List.of(white, black)) {
+            var snapshot = data(get(player, "/api/state"));
+            assertEquals(played.get("room"), snapshot.get("room"));
+            assertEquals(played.get("pieces"), snapshot.get("pieces"));
+        }
+    }
+
+    @Test void invalidJsonMovesPreserveTheGameAndBrowserSessions() throws Exception {
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        String code = data(createGame(white, whiteToken, "Alice")).get("id").getAsString();
+        assertEquals(200, post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", code)).statusCode());
+        var original = data(get(white, "/api/state"));
+        Room saved = rooms.execute(code);
+        URI uri = server.uri().resolve("/games/" + code);
+
+        assertEquals(403, putGame(white, code, Map.of("token", "wrong", "from", "invalid", "to", "e4")).statusCode());
+        assertEquals(400, putGame(white, code, Map.of("token", whiteToken, "from", "e2", "to", "e5")).statusCode());
+        assertEquals(400, putGame(white, code, Map.of("token", whiteToken, "from", "a1", "to", "a4")).statusCode());
+        assertEquals(400, putGame(white, code, Map.of("token", whiteToken, "from", "e2", "to", "e4", "promotion", "king")).statusCode());
+        assertEquals(400, putGame(white, code, Map.of("token", whiteToken, "from", "e2")).statusCode());
+        assertEquals(400, putGame(black, code, Map.of("token", blackToken, "from", "e7", "to", "e5")).statusCode());
+        for (String invalid : List.of("{", "[]", "null", "{} {}", "{\"from\":23}")) {
+            var response = putGame(white, uri, invalid);
+            assertEquals(400, response.statusCode(), invalid);
+            assertTrue(data(response).has("message"));
+        }
+        HttpClient outsider = browser();
+        assertEquals(400, putGame(outsider, code, Map.of("token", token(outsider), "from", "e2", "to", "e4")).statusCode());
+        assertTrue(data(get(outsider, "/api/state")).get("room").isJsonNull());
+        assertEquals(original, data(get(white, "/api/state")));
+        assertSame(saved, rooms.execute(code));
+    }
+
+    @Test void jsonMovesRequireAnExistingGameJsonContentAndALimitedBody() throws Exception {
+        String whiteToken = token(white);
+        var missing = putGame(white, "MISSING", Map.of("token", whiteToken, "from", "e2", "to", "e4"));
+        assertEquals(404, missing.statusCode());
+        assertEquals("Game not found.", data(missing).get("message").getAsString());
+        assertTrue(data(get(white, "/api/state")).get("room").isJsonNull());
+        URI uri = server.uri().resolve("/games/MISSING");
+        var wrongType = white.send(HttpRequest.newBuilder(uri).header("Content-Type", "text/plain")
+                .PUT(HttpRequest.BodyPublishers.ofString("{}")).build(), HttpResponse.BodyHandlers.ofString());
+        assertEquals(415, wrongType.statusCode());
+        assertEquals("Expected application/json.", data(wrongType).get("message").getAsString());
+        var oversized = putGame(white, uri, "x".repeat(8193));
+        assertEquals(413, oversized.statusCode());
+        assertEquals("Request too large", data(oversized).get("message").getAsString());
+        var directOversized = putGame(white, gameServer.uri().resolve("/games/MISSING"), "x".repeat(8193));
+        assertEquals(413, directOversized.statusCode());
+        assertEquals("Request too large", data(directOversized).get("message").getAsString());
     }
 
     @Test void concurrentJoinRequestsCannotClaimTheSameSeat() throws Exception {
@@ -316,7 +408,7 @@ class RoomHttpIntegrationTest {
         var created = data(createdResponse);
         String code = created.getAsJsonObject("room").get("code").getAsString();
         assertEquals(200, post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", code)).statusCode());
-        assertEquals(200, move(white, whiteToken, "e2", "e4").statusCode());
+        assertEquals(200, putGame(white, code, Map.of("token", whiteToken, "from", "e2", "to", "e4")).statusCode());
         var beforeRestart = data(move(black, blackToken, "e7", "e5"));
         stop();
         database = new SqliteDatabase(path);
@@ -475,7 +567,9 @@ class RoomHttpIntegrationTest {
         assertEquals(finalRoom, data(get(black, "/api/state")).getAsJsonObject("room"));
     }
 
-    @Test void acceptsAPromotionChoiceAndReturnsItInBothPlayersHistory() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void acceptsAPromotionChoiceAndReturnsItInBothPlayersHistory(boolean json) throws Exception {
         String whiteToken = token(white);
         String blackToken = token(black);
         var created = data(post(white, Map.of("token", whiteToken, "action", "create", "name", "Alice")));
@@ -489,11 +583,15 @@ class RoomHttpIntegrationTest {
                     squares.substring(0, 2), squares.substring(2)).statusCode(), squares);
         }
         Room beforePromotion = rooms.execute(code);
-        var invalid = post(white, Map.of("token", whiteToken, "action", "move", "from", "b7", "to", "a8", "promotion", "king"));
+        var invalid = json
+                ? putGame(white, code, Map.of("token", whiteToken, "from", "b7", "to", "a8", "promotion", "king"))
+                : post(white, Map.of("token", whiteToken, "action", "move", "from", "b7", "to", "a8", "promotion", "king"));
         assertEquals(400, invalid.statusCode());
         assertSame(beforePromotion, rooms.execute(code));
 
-        var response = post(white, Map.of("token", whiteToken, "action", "move", "from", "b7", "to", "a8", "promotion", " Knight "));
+        var response = json
+                ? putGame(white, code, Map.of("token", whiteToken, "from", "b7", "to", "a8", "promotion", " Knight "))
+                : post(white, Map.of("token", whiteToken, "action", "move", "from", "b7", "to", "a8", "promotion", " Knight "));
         assertEquals(200, response.statusCode());
         var promoted = data(response);
         var opponent = data(get(black, "/api/state"));
