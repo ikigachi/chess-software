@@ -1,6 +1,6 @@
 package software.ulpgc.chess.gameservice.infrastructure.adapters;
 
-import com.sun.net.httpserver.HttpExchange;
+import io.javalin.http.Context;
 import software.ulpgc.chess.application.domain.model.User;
 
 import java.nio.charset.StandardCharsets;
@@ -29,8 +29,8 @@ public final class BrowserSessions {
         this.clock = Objects.requireNonNull(clock);
     }
 
-    Session get(HttpExchange exchange) {
-        String cookie = exchange.getRequestHeaders().getFirst("Cookie");
+    Session get(Context context) {
+        String cookie = context.header("Cookie");
         String credential = null;
         if (cookie != null) for (String part : cookie.split(";")) {
             String[] pair = part.strip().split("=", 2);
@@ -47,7 +47,7 @@ public final class BrowserSessions {
             sessions.put(credential, session);
         }
         if (issueCookie) {
-            exchange.getResponseHeaders().add("Set-Cookie", "regalia=" + credential + "; Path=/; HttpOnly; SameSite=Lax");
+            context.addHeader("Set-Cookie", "regalia=" + credential + "; Path=/; HttpOnly; SameSite=Lax");
         }
         session.lastSeen = now;
         return session;

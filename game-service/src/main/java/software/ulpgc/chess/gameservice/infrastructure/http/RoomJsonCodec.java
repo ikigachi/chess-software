@@ -2,6 +2,9 @@ package software.ulpgc.chess.gameservice.infrastructure.http;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.google.gson.Strictness;
 import software.ulpgc.chess.application.domain.model.*;
 
 import java.util.LinkedHashMap;
@@ -10,7 +13,27 @@ import java.util.Locale;
 import java.util.Map;
 
 public final class RoomJsonCodec {
-    private final Gson gson = new GsonBuilder().serializeNulls().create();
+    private final Gson gson = new GsonBuilder().serializeNulls().setStrictness(Strictness.STRICT).create();
+
+    public CreateRequest createRequest(String json) {
+        try {
+            JsonObject fields = gson.fromJson(json, JsonObject.class);
+            if (fields == null) throw new IllegalArgumentException("Expected a JSON object.");
+            return new CreateRequest(string(fields, "name"), string(fields, "token"));
+        } catch (JsonParseException exception) {
+            throw new IllegalArgumentException("Invalid JSON request.", exception);
+        }
+    }
+
+    private String string(JsonObject fields, String name) {
+        var value = fields.get(name);
+        if (value == null || value.isJsonNull()) return null;
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString())
+            throw new IllegalArgumentException("Expected a string for " + name + ".");
+        return value.getAsString();
+    }
+
+    public record CreateRequest(String name, String token) {}
 
     public String snapshot(Room room, User viewer, String token, String message, boolean whiteConnected, boolean blackConnected) {
         Board board = room == null ? Board.initial() : room.game().state().board();

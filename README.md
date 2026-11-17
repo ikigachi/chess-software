@@ -11,6 +11,8 @@ Build a chess application where two users connect through a shared room code, pl
 | JDK | 27 |
 | Maven | Builds the four modules and resolves dependencies |
 | Gson | 2.14.0, backend JSON serialization |
+| Javalin | 7.2.4, web server and game-service HTTP routes |
+| SLF4J Simple | 2.0.20, server logging |
 | SQLite JDBC | 3.54.1.0, local game storage |
 | JUnit Jupiter | 5.11.4, automated tests only |
 
@@ -84,7 +86,7 @@ flowchart LR
     G -->|"RoomRepository via JDBC"| D["SQLite database"]
 ```
 
-The browser uses the web server as its origin. The web server and game service run in separate Java processes and communicate through HTTP. The game service persists rooms in SQLite and manages active browser sessions in memory. Browser cookies let the original players reopen a saved room with its code after restarting the game service.
+The browser uses the web server as its origin. The web server and game service use Javalin, run in separate Java processes and communicate through HTTP. The game service persists rooms in SQLite and manages active browser sessions in memory. Browser cookies let the original players reopen a saved room with its code after restarting the game service.
 
 This is the first service extraction from the architecture discussed in class. Room coordination remains in `game-service` during this step. Separate player, matches, registration and authentication services, together with NGINX routing, are pending.
 
@@ -103,6 +105,8 @@ This is the first service extraction from the architecture discussed in class. R
 
 Game-service package paths are relative to `software/ulpgc/chess/gameservice`. Its `Main` connects the collaborators through constructors. Storage-facing use cases depend on `RoomRepository`, while `EnterRoomUseCase` composes lookup and joining. Domain rules do not depend on HTTP, JSON or storage implementations.
 
+`GameHttpServer` declares the Javalin routes, including `get("/games/{id}", ...)` and `post("/games", ...)`. Its handlers adapt the Javalin `Context` to the existing use cases. Room operations execute one at a time to preserve consistent updates. This follows the framework used in the classroom example.
+
 ### Lightweight frontend architecture
 
 | Role | Current implementation |
@@ -117,7 +121,9 @@ Game-service package paths are relative to `software/ulpgc/chess/gameservice`. I
 
 ## Communication contract
 
-`GET /games/{id}` returns the stored game identifier, a `room` object with players, turn, result and move history, and the `pieces` map. The current application uses the room code as the game identifier. Anyone with the code can consult this read-only endpoint. For example, open `http://127.0.0.1:8080/games/ABC123` with an existing room code. A missing game returns `404`. Methods other than `GET` return `405`. This is the first game route introduced from the service architecture discussed in class.
+`POST /games` creates a game from a JSON object containing `name` and the `token` obtained from `GET /api/state`. Send both requests with the same browser cookie. A successful response has status `201`, includes the game `id`, `room` and `pieces`, and provides its URL in the `Location` header. Invalid JSON or names return `400`, invalid tokens return `403`, oversized bodies return `413` and unsupported content types return `415`.
+
+`GET /games/{id}` returns the stored game identifier, a `room` object with players, turn, result and move history, and the `pieces` map. The current application uses the room code as the game identifier. Anyone with the code can consult this read-only endpoint. For example, open `http://127.0.0.1:8080/games/ABC123` with an existing room code. A missing game returns `404`. Both game routes are accessible directly on the game-service port or through the web server.
 
 The frontend uses `GET /api/state` to retrieve the game state and `POST /api/action` to create or join a room, move, refresh or leave. Requests use form fields. JSON responses contain the players, board, turn and history, or an error message. The `presence` object reports `whiteConnected` and `blackConnected` while viewing a room. `room.inCheck` indicates that the player to move is in check. `room.winner` contains `White` or `Black` after checkmate and is otherwise `null`. `room.stalemate` is `true` after a draw by stalemate. A move can include a `promotion` choice of `queen`, `rook`, `bishop` or `knight`. Supplied choices appear in the move history. The server defaults to a queen when a pawn promotes without a choice.
 
@@ -166,7 +172,7 @@ Run all automated checks from the repository root:
 mvn test
 ```
 
-The latest run passed 86 tests. The same repository contract tests run against SQLite and in-memory storage. HTTP integration tests run the web server and game service separately, exercising forwarded cookies, game queries and actions. They also check that an unavailable game service produces `503` while the page remains accessible. To reproduce the restart check, play two moves, note the room code, restart the game service and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
+The latest run passed 90 tests. The same repository contract tests run against SQLite and in-memory storage. HTTP integration tests run the web server and game service separately, exercising Javalin routing, JSON game creation, forwarded cookies, concurrent joining, game queries and actions. They also check that an unavailable game service produces `503` while the page remains accessible. To reproduce the restart check, play two moves, note the room code, restart the game service and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 

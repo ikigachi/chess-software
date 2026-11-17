@@ -1,31 +1,34 @@
 package software.ulpgc.chess.backend.infrastructure.adapters;
 
-import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpHandler;
+import io.javalin.Javalin;
+import io.javalin.http.Handler;
+import io.javalin.http.HandlerType;
 
-import java.io.IOException;
-import java.net.InetSocketAddress;
 import java.net.URI;
 import java.util.Objects;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public final class RoomHttpServer implements AutoCloseable {
-    private final HttpServer server;
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final Javalin server;
+    private final int port;
 
-    public RoomHttpServer(int port, HttpHandler proxy, StaticAssetHandler assets) throws IOException {
+    public RoomHttpServer(int port, Handler proxy, StaticAssetHandler assets) {
         Objects.requireNonNull(proxy);
         Objects.requireNonNull(assets);
-        server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
-        server.setExecutor(executor);
-        server.createContext("/api/", proxy);
-        server.createContext("/games", proxy);
-        server.createContext("/", assets);
+        this.port = port;
+        server = Javalin.create(config -> {
+            config.router.ignoreTrailingSlashes = false;
+            for (HandlerType method : HandlerType.commonHttp()) {
+                config.routes.addHttpHandler(method, "/api/*", proxy);
+                config.routes.addHttpHandler(method, "/games", proxy);
+                config.routes.addHttpHandler(method, "/games/*", proxy);
+                config.routes.addHttpHandler(method, "/", assets);
+                config.routes.addHttpHandler(method, "/*", assets);
+            }
+        });
     }
 
-    public void start() { server.start(); }
-    public URI uri() { return URI.create("http://127.0.0.1:" + server.getAddress().getPort()); }
+    public void start() { server.start("127.0.0.1", port); }
+    public URI uri() { return URI.create("http://127.0.0.1:" + server.port()); }
 
-    @Override public void close() { server.stop(0); executor.shutdownNow(); }
+    @Override public void close() { server.stop(); }
 }

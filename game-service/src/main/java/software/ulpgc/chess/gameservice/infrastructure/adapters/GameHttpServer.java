@@ -1,33 +1,51 @@
 package software.ulpgc.chess.gameservice.infrastructure.adapters;
 
-import com.sun.net.httpserver.HttpServer;
+import io.javalin.Javalin;
+import io.javalin.http.MethodNotAllowedResponse;
+import io.javalin.http.NotFoundResponse;
+import software.ulpgc.chess.gameservice.infrastructure.http.ApiMessages;
 
-import java.io.IOException;
-import java.net.InetSocketAddress;
 import java.net.URI;
 import java.util.Objects;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 public final class GameHttpServer implements AutoCloseable {
-    private final HttpServer server;
-    private final ExecutorService executor;
+    private final Javalin server;
+    private final int port;
 
-    public GameHttpServer(int port, RoomApiHandler rooms, GameApiHandler games) throws IOException {
+    public GameHttpServer(int port, RoomApiHandler rooms, GameApiHandler games) {
         Objects.requireNonNull(rooms);
         Objects.requireNonNull(games);
-        server = HttpServer.create(new InetSocketAddress("127.0.0.1", port), 0);
-        executor = Executors.newSingleThreadExecutor();
-        server.setExecutor(executor);
-        server.createContext("/api/", rooms);
-        server.createContext("/games", games);
+        this.port = port;
+        server = Javalin.create(config -> {
+            config.http.prefer405over404 = true;
+            config.router.ignoreTrailingSlashes = false;
+            config.router.handlerWrapper(endpoint -> context -> {
+                synchronized (rooms) {
+                    endpoint.handler.handle(context);
+                }
+            });
+            config.routes.get("/api/state", rooms);
+            config.routes.post("/api/action", rooms);
+            config.routes.get("/games/{id}", games::retrieve);
+            config.routes.post("/games", games::create);
+            config.routes.exception(NotFoundResponse.class, (exception, context) ->
+                    games.error(context, 404, ApiMessages.NOT_FOUND));
+            config.routes.exception(MethodNotAllowedResponse.class, (exception, context) -> {
+                String allowed = context.path().equals("/games") || context.path().equals("/api/action") ? "POST" : "GET";
+                context.header("Allow", allowed);
+                games.error(context, 405, ApiMessages.METHOD_NOT_ALLOWED);
+            });
+            config.routes.exception(IllegalArgumentException.class, (exception, context) ->
+                    games.error(context, 400, exception.getMessage()));
+            config.routes.exception(IllegalStateException.class, (exception, context) ->
+                    games.error(context, 503, ApiMessages.UNAVAILABLE));
+            config.routes.exception(Exception.class, (exception, context) ->
+                    games.error(context, 500, ApiMessages.FAILED));
+        });
     }
 
-    public void start() { server.start(); }
-    public URI uri() { return URI.create("http://127.0.0.1:" + server.getAddress().getPort()); }
+    public void start() { server.start("127.0.0.1", port); }
+    public URI uri() { return URI.create("http://127.0.0.1:" + server.port()); }
 
-    @Override public void close() {
-        server.stop(0);
-        executor.shutdownNow();
-    }
+    @Override public void close() { server.stop(); }
 }
