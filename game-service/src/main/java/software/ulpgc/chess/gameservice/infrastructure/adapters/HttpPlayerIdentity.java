@@ -43,7 +43,7 @@ public final class HttpPlayerIdentity implements PlayerIdentity, AutoCloseable {
                 if (body.length > 8192) throw new IOException("Player service response is too large.");
                 JsonObject player = gson.fromJson(new String(body, StandardCharsets.UTF_8), JsonObject.class);
                 if (player == null) throw new IOException("Missing player service response.");
-                return new User(string(player, "id"), string(player, "name"));
+                return new User(readRequiredString(player, "id"), readRequiredString(player, "name"));
             }
         } catch (IOException | JsonParseException | IllegalArgumentException exception) {
             throw new IllegalStateException("Player service is unavailable.", exception);
@@ -53,7 +53,7 @@ public final class HttpPlayerIdentity implements PlayerIdentity, AutoCloseable {
         }
     }
 
-    private String string(JsonObject fields, String name) throws IOException {
+    private String readRequiredString(JsonObject fields, String name) throws IOException {
         var value = fields.get(name);
         if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString())
             throw new IOException("Invalid player service response.");

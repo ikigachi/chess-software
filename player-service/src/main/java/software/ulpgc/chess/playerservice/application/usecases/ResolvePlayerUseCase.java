@@ -18,7 +18,7 @@ public final class ResolvePlayerUseCase {
     }
 
     public User execute(String credential) {
-        if (!isCredential(credential))
+        if (!isCanonicalUuid(credential))
             throw new IllegalArgumentException("Invalid player credential.");
         try {
             byte[] hash = MessageDigest.getInstance("SHA-256").digest(credential.getBytes(StandardCharsets.UTF_8));
@@ -29,7 +29,7 @@ public final class ResolvePlayerUseCase {
         }
     }
 
-    private boolean isCredential(String value) {
+    private boolean isCanonicalUuid(String value) {
         if (value == null || value.length() != 36) return false;
         try {
             return value.equals(UUID.fromString(value).toString());

@@ -18,20 +18,22 @@ public final class PlayerHttpServer implements AutoCloseable {
         server = Javalin.create(config -> {
             config.http.prefer405over404 = true;
             config.router.ignoreTrailingSlashes = false;
-            config.routes.post("/players/resolve", players::resolve);
-            config.routes.put("/players/name", players::rename);
+            config.routes.post("/players/resolve", players::resolvePlayer);
+            config.routes.put("/players/name", players::renamePlayer);
             config.routes.exception(JsonParseException.class, (exception, context) ->
-                    players.error(context, 400, "Invalid JSON request."));
+                    players.sendErrorResponse(context, 400, "Invalid JSON request."));
             config.routes.exception(IllegalArgumentException.class, (exception, context) ->
-                    players.error(context, 400, exception.getMessage()));
+                    players.sendErrorResponse(context, 400, exception.getMessage()));
+            config.routes.exception(IllegalStateException.class, (exception, context) ->
+                    players.sendErrorResponse(context, 503, "Player storage is unavailable. Try again later."));
             config.routes.exception(NotFoundResponse.class, (exception, context) ->
-                    players.error(context, 404, "Not found"));
+                    players.sendErrorResponse(context, 404, "Not found"));
             config.routes.exception(MethodNotAllowedResponse.class, (exception, context) -> {
                 context.header("Allow", context.path().equals("/players/name") ? "PUT" : "POST");
-                players.error(context, 405, "Method not allowed");
+                players.sendErrorResponse(context, 405, "Method not allowed");
             });
             config.routes.exception(Exception.class, (exception, context) ->
-                    players.error(context, 500, "Could not resolve the player identity."));
+                    players.sendErrorResponse(context, 500, "Could not resolve the player identity."));
         });
     }
 
