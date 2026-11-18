@@ -12,9 +12,10 @@ public final class GameHttpServer implements AutoCloseable {
     private final Javalin server;
     private final int port;
 
-    public GameHttpServer(int port, RoomApiHandler rooms, GameApiHandler games) {
+    public GameHttpServer(int port, RoomApiHandler rooms, GameApiHandler games, PlayerProfileApiHandler profiles) {
         Objects.requireNonNull(rooms);
         Objects.requireNonNull(games);
+        Objects.requireNonNull(profiles);
         this.port = port;
         server = Javalin.create(config -> {
             config.http.prefer405over404 = true;
@@ -26,6 +27,8 @@ public final class GameHttpServer implements AutoCloseable {
             });
             config.routes.get("/api/state", rooms);
             config.routes.post("/api/action", rooms);
+            config.routes.get("/api/profile", profiles);
+            config.routes.put("/api/profile", profiles);
             config.routes.get("/games/{id}", games::retrieve);
             config.routes.put("/games/{id}", games::move);
             config.routes.post("/games", games::create);
@@ -33,7 +36,7 @@ public final class GameHttpServer implements AutoCloseable {
                     games.error(context, 404, ApiMessages.NOT_FOUND));
             config.routes.exception(MethodNotAllowedResponse.class, (exception, context) -> {
                 String allowed = context.path().equals("/games") || context.path().equals("/api/action") ? "POST" : "GET";
-                if (context.path().startsWith("/games/")) allowed = "GET, PUT";
+                if (context.path().startsWith("/games/") || context.path().equals("/api/profile")) allowed = "GET, PUT";
                 context.header("Allow", allowed);
                 games.error(context, 405, ApiMessages.METHOD_NOT_ALLOWED);
             });

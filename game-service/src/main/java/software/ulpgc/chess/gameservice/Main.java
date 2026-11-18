@@ -19,11 +19,12 @@ public class Main {
         RoomJsonCodec codec = new RoomJsonCodec();
         CreateRoomUseCase create = new CreateRoomUseCase(repository);
         MoveUseCase move = new MoveUseCase(repository);
-        HttpPlayerIdentity players = new HttpPlayerIdentity(URI.create(args.length > 2 ? args[2] : "http://127.0.0.1:8082"));
+        HttpPlayerService players = new HttpPlayerService(URI.create(args.length > 2 ? args[2] : "http://127.0.0.1:8082"));
         try {
             BrowserSessions sessions = new BrowserSessions(players);
             RoomApiHandler api = new RoomApiHandler(create, get, enter, move, sessions, codec);
-            GameHttpServer server = new GameHttpServer(port, api, new GameApiHandler(create, get, move, sessions, codec));
+            var profiles = new PlayerProfileApiHandler(new PlayerProfileUseCases(players, players), sessions, codec);
+            GameHttpServer server = new GameHttpServer(port, api, new GameApiHandler(create, get, move, sessions, codec), profiles);
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 server.close();
                 players.close();

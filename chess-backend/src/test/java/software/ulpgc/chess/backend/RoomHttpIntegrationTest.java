@@ -2,6 +2,7 @@ package software.ulpgc.chess.backend;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import io.javalin.Javalin;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -17,6 +18,9 @@ import software.ulpgc.chess.playerservice.application.usecases.RenamePlayerUseCa
 import software.ulpgc.chess.playerservice.infrastructure.adapters.InMemoryPlayerRepository;
 import software.ulpgc.chess.playerservice.infrastructure.adapters.PlayerApiHandler;
 import software.ulpgc.chess.playerservice.infrastructure.adapters.PlayerHttpServer;
+import software.ulpgc.chess.playerservice.infrastructure.adapters.SqlitePlayerDatabase;
+import software.ulpgc.chess.playerservice.infrastructure.adapters.SqlitePlayerRepository;
+import software.ulpgc.chess.playerservice.application.ports.PlayerRepository;
 
 import java.net.*;
 import java.net.http.*;
@@ -30,6 +34,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -37,7 +42,7 @@ class RoomHttpIntegrationTest {
     private RoomHttpServer server;
     private GameHttpServer gameServer;
     private PlayerHttpServer playerServer;
-    private HttpPlayerIdentity playerIdentity;
+    private HttpPlayerService playerIdentity;
     private GameServiceProxy proxy;
     private GetRoomUseCase rooms;
     private final HttpClient white = browser();
@@ -52,24 +57,28 @@ class RoomHttpIntegrationTest {
     }
 
     private void start(RoomRepository repository, Clock clock) throws Exception {
-        playerServer = playerServer(0);
+        playerServer = createPlayerHttpServer(0);
         playerServer.start();
-        playerIdentity = new HttpPlayerIdentity(playerServer.uri());
+        playerIdentity = new HttpPlayerService(playerServer.uri());
         BrowserSessions sessions = new BrowserSessions(playerIdentity, clock);
         rooms = new GetRoomUseCase(repository);
         RoomApiHandler api = new RoomApiHandler(new CreateRoomUseCase(repository), rooms,
                 new EnterRoomUseCase(rooms, new JoinRoomUseCase(repository)),
                 new MoveUseCase(repository), sessions, new RoomJsonCodec());
         gameServer = new GameHttpServer(0, api,
-                new GameApiHandler(new CreateRoomUseCase(repository), rooms, new MoveUseCase(repository), sessions, new RoomJsonCodec()));
+                new GameApiHandler(new CreateRoomUseCase(repository), rooms, new MoveUseCase(repository), sessions, new RoomJsonCodec()),
+                new PlayerProfileApiHandler(new PlayerProfileUseCases(playerIdentity, playerIdentity), sessions, new RoomJsonCodec()));
         gameServer.start();
         proxy = new GameServiceProxy(gameServer.uri());
         server = new RoomHttpServer(0, proxy, new StaticAssetHandler());
         server.start();
     }
 
-    private PlayerHttpServer playerServer(int port) {
-        var repository = new InMemoryPlayerRepository();
+    private PlayerHttpServer createPlayerHttpServer(int port) {
+        return createPlayerHttpServer(port, new InMemoryPlayerRepository());
+    }
+
+    private PlayerHttpServer createPlayerHttpServer(int port, PlayerRepository repository) {
         var resolve = new ResolvePlayerUseCase(repository);
         return new PlayerHttpServer(port, new PlayerApiHandler(resolve, new RenamePlayerUseCase(resolve, repository)));
     }
@@ -132,6 +141,179 @@ class RoomHttpIntegrationTest {
     private HttpResponse<String> putGame(HttpClient client, URI uri, String json) throws Exception {
         return client.send(HttpRequest.newBuilder(uri).header("Content-Type", "application/json")
                 .PUT(HttpRequest.BodyPublishers.ofString(json)).build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> updatePlayerProfile(HttpClient client, String token, String name) throws Exception {
+        JsonObject request = new JsonObject();
+        request.addProperty("token", token);
+        request.addProperty("name", name);
+        return sendProfileUpdateJson(client, request.toString());
+    }
+
+    private HttpResponse<String> sendProfileUpdateJson(HttpClient client, String json) throws Exception {
+        return client.send(HttpRequest.newBuilder(server.uri().resolve("/api/profile"))
+                .header("Content-Type", "application/json").PUT(HttpRequest.BodyPublishers.ofString(json)).build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    private String readBrowserSessionCredential(HttpClient client) {
+        var cookies = assertInstanceOf(CookieManager.class, client.cookieHandler().orElseThrow()).getCookieStore().getCookies();
+        return cookies.stream().filter(cookie -> cookie.getName().equals("regalia"))
+                .findFirst().orElseThrow().getValue();
+    }
+
+    @Test void updatesTheSessionProfileAndPersistsItWithoutChangingTheSavedGame(@TempDir Path directory) throws Exception {
+        int port = playerServer.uri().getPort();
+        playerServer.close();
+        var database = new SqlitePlayerDatabase(directory.resolve("players.sqlite"));
+        database.initializeSchema();
+        playerServer = createPlayerHttpServer(port, new SqlitePlayerRepository(database));
+        playerServer.start();
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        String code = data(createGame(white, whiteToken, "Alice")).get("id").getAsString();
+        assertEquals(200, post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", code)).statusCode());
+        assertEquals(200, putGame(white, code, Map.of("token", whiteToken, "from", "e2", "to", "e4")).statusCode());
+        var before = data(get(white, "/api/state"));
+        Room saved = rooms.execute(code);
+
+        var response = updatePlayerProfile(white, whiteToken, " Renamed ");
+
+        assertEquals(200, response.statusCode());
+        var updated = data(response);
+        assertEquals("Renamed", updated.getAsJsonObject("profile").get("name").getAsString());
+        assertEquals(saved.white().id(), updated.getAsJsonObject("profile").get("id").getAsString());
+        assertEquals(whiteToken, updated.get("token").getAsString());
+        assertFalse(response.body().contains(readBrowserSessionCredential(white)));
+        var current = data(get(white, "/api/state"));
+        assertEquals(updated.get("profile"), current.get("viewer"));
+        assertEquals(before.get("room"), current.get("room"));
+        assertEquals(before.get("pieces"), current.get("pieces"));
+        assertSame(saved, rooms.execute(code));
+        assertEquals("Guest", data(get(black, "/api/profile")).getAsJsonObject("profile").get("name").getAsString());
+
+        playerServer.close();
+        var restarted = new SqlitePlayerDatabase(directory.resolve("players.sqlite"));
+        restarted.initializeSchema();
+        playerServer = createPlayerHttpServer(port, new SqlitePlayerRepository(restarted));
+        playerServer.start();
+
+        assertEquals(updated, data(get(white, "/api/profile")));
+        assertEquals(new User(saved.white().id(), "Renamed"), new SqlitePlayerRepository(restarted).findById(saved.white().id()).orElseThrow());
+        assertSame(saved, rooms.execute(code));
+    }
+
+    @Test void rejectsInvalidProfileUpdatesAndIgnoresClaimedPlayerIdentities() throws Exception {
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        assertEquals(200, updatePlayerProfile(white, whiteToken, "Alice").statusCode());
+        assertEquals(200, updatePlayerProfile(black, blackToken, "Bob").statusCode());
+        var original = data(get(white, "/api/state"));
+        var otherProfile = data(get(black, "/api/profile"));
+        assertEquals(403, updatePlayerProfile(white, "wrong", " ").statusCode());
+        assertEquals(403, sendProfileUpdateJson(white, "{}").statusCode());
+        for (String invalid : List.of("{", "[]", "null", "{} {}", "{\"name\":23}",
+                "{\"token\":\"" + whiteToken + "\"}")) {
+            var response = sendProfileUpdateJson(white, invalid);
+            assertEquals(400, response.statusCode(), invalid);
+            assertEquals(whiteToken, data(response).get("token").getAsString());
+        }
+        assertEquals(400, updatePlayerProfile(white, whiteToken, "x".repeat(41)).statusCode());
+        var wrongType = white.send(HttpRequest.newBuilder(server.uri().resolve("/api/profile"))
+                .header("Content-Type", "text/plain").PUT(HttpRequest.BodyPublishers.ofString("{}")).build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(415, wrongType.statusCode());
+        assertEquals(413, sendProfileUpdateJson(white, "x".repeat(8193)).statusCode());
+        assertEquals(original, data(get(white, "/api/state")));
+        assertEquals(otherProfile, data(get(black, "/api/profile")));
+
+        JsonObject claimedIdentity = new JsonObject();
+        claimedIdentity.addProperty("token", whiteToken);
+        claimedIdentity.addProperty("name", "Only Alice changes");
+        claimedIdentity.addProperty("id", otherProfile.getAsJsonObject("profile").get("id").getAsString());
+        claimedIdentity.addProperty("credential", readBrowserSessionCredential(black));
+        assertEquals(200, sendProfileUpdateJson(white, claimedIdentity.toString()).statusCode());
+        assertEquals("Only Alice changes", data(get(white, "/api/profile")).getAsJsonObject("profile").get("name").getAsString());
+        assertEquals(otherProfile, data(get(black, "/api/profile")));
+        var wrongMethod = white.send(HttpRequest.newBuilder(server.uri().resolve("/api/profile"))
+                .DELETE().build(), HttpResponse.BodyHandlers.ofString());
+        assertEquals(405, wrongMethod.statusCode());
+        assertEquals("GET, PUT", wrongMethod.headers().firstValue("Allow").orElseThrow());
+    }
+
+    @Test void missingAndExpiredProfileSessionsAreRejectedWithoutIssuingCookies() throws Exception {
+        stop();
+        AtomicLong elapsed = new AtomicLong();
+        InstantSource time = () -> Instant.ofEpochMilli(elapsed.get());
+        start(new InMemoryRoomRepository(), time.withZone(ZoneOffset.UTC));
+        for (var response : List.of(get(white, "/api/profile"), updatePlayerProfile(white, "wrong", "Alice"))) {
+            assertEquals(401, response.statusCode());
+            assertTrue(response.headers().firstValue("Set-Cookie").isEmpty());
+            assertTrue(data(response).get("token").isJsonNull());
+        }
+        String oldToken = token(white);
+        assertEquals(200, updatePlayerProfile(white, oldToken, "Alice").statusCode());
+        elapsed.set(8 * 60 * 60 * 1000L + 1);
+        assertEquals(401, get(white, "/api/profile").statusCode());
+        assertEquals(401, updatePlayerProfile(white, oldToken, "Renamed").statusCode());
+        String newToken = token(white);
+        assertNotEquals(oldToken, newToken);
+        assertEquals(403, updatePlayerProfile(white, oldToken, "Renamed").statusCode());
+        assertEquals("Alice", data(get(white, "/api/profile")).getAsJsonObject("profile").get("name").getAsString());
+    }
+
+    @Test void unavailablePlayerServicePreservesTheSessionProfileUntilRecovery() throws Exception {
+        String token = token(white);
+        assertEquals(200, updatePlayerProfile(white, token, "Alice").statusCode());
+        var original = data(get(white, "/api/state"));
+        int port = playerServer.uri().getPort();
+        playerServer.close();
+
+        var failure = updatePlayerProfile(white, token, "Renamed");
+
+        assertEquals(503, failure.statusCode());
+        assertEquals(token, data(failure).get("token").getAsString());
+        assertEquals(original, data(get(white, "/api/state")));
+        playerServer = createPlayerHttpServer(port);
+        playerServer.start();
+        assertEquals(200, updatePlayerProfile(white, token, "Recovered").statusCode());
+        assertEquals("Recovered", data(get(white, "/api/profile")).getAsJsonObject("profile").get("name").getAsString());
+    }
+
+    @Test void reloadsTheProfileWhenTheNameWasSavedButTheAcknowledgementWasInvalid() throws Exception {
+        String token = token(white);
+        var original = data(get(white, "/api/state"));
+        String playerId = original.getAsJsonObject("viewer").get("id").getAsString();
+        int port = playerServer.uri().getPort();
+        playerServer.close();
+        playerServer = null;
+        AtomicReference<String> savedProfile = new AtomicReference<>();
+        AtomicReference<String> receivedCredential = new AtomicReference<>();
+        Javalin remote = Javalin.create(config -> {
+            config.routes.put("/players/name", context -> {
+                var fields = JsonParser.parseString(new String(context.bodyInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject();
+                receivedCredential.set(fields.get("credential").getAsString());
+                JsonObject profile = new JsonObject();
+                profile.addProperty("id", playerId);
+                profile.addProperty("name", fields.get("name").getAsString());
+                savedProfile.set(profile.toString());
+                context.contentType("application/json").result("{");
+            });
+            config.routes.post("/players/resolve", context -> context.contentType("application/json").result(savedProfile.get()));
+        }).start("127.0.0.1", port);
+        try {
+            assertEquals(503, updatePlayerProfile(white, token, "Saved remotely").statusCode());
+            assertEquals(original, data(get(white, "/api/state")));
+            assertEquals(readBrowserSessionCredential(white), receivedCredential.get());
+
+            var reloaded = get(white, "/api/profile");
+
+            assertEquals(200, reloaded.statusCode());
+            assertEquals("Saved remotely", data(reloaded).getAsJsonObject("profile").get("name").getAsString());
+            assertEquals(data(reloaded).get("profile"), data(get(white, "/api/state")).get("viewer"));
+        } finally {
+            remote.stop();
+        }
     }
 
     @Test void servesStaticMarkupJavascriptAndAllPieceAssets() throws Exception {
@@ -202,7 +384,7 @@ class RoomHttpIntegrationTest {
         assertEquals(200, putGame(black, code, Map.of("token", blackToken, "from", "e7", "to", "e5")).statusCode());
         assertEquals(2, rooms.execute(code).game().moves().size());
 
-        playerServer = playerServer(playerPort);
+        playerServer = createPlayerHttpServer(playerPort);
         playerServer.start();
 
         assertEquals(200, get(newcomer, "/api/state").statusCode());

@@ -16,17 +16,22 @@ public final class RoomJsonCodec {
     private final Gson gson = new GsonBuilder().serializeNulls().setStrictness(Strictness.STRICT).create();
 
     public CreateRequest createRequest(String json) {
-        JsonObject fields = object(json);
-        return new CreateRequest(string(fields, "name"), string(fields, "token"));
+        JsonObject fields = parseJsonObject(json);
+        return new CreateRequest(readOptionalString(fields, "name"), readOptionalString(fields, "token"));
     }
 
     public MoveRequest moveRequest(String json) {
-        JsonObject fields = object(json);
-        return new MoveRequest(string(fields, "from"), string(fields, "to"),
-                string(fields, "promotion"), string(fields, "token"));
+        JsonObject fields = parseJsonObject(json);
+        return new MoveRequest(readOptionalString(fields, "from"), readOptionalString(fields, "to"),
+                readOptionalString(fields, "promotion"), readOptionalString(fields, "token"));
     }
 
-    private JsonObject object(String json) {
+    public UpdatePlayerProfileRequest parsePlayerProfileUpdateRequest(String json) {
+        JsonObject fields = parseJsonObject(json);
+        return new UpdatePlayerProfileRequest(readOptionalString(fields, "name"), readOptionalString(fields, "token"));
+    }
+
+    private JsonObject parseJsonObject(String json) {
         try {
             JsonObject fields = gson.fromJson(json, JsonObject.class);
             if (fields == null) throw new IllegalArgumentException("Expected a JSON object.");
@@ -36,7 +41,7 @@ public final class RoomJsonCodec {
         }
     }
 
-    private String string(JsonObject fields, String name) {
+    private String readOptionalString(JsonObject fields, String name) {
         var value = fields.get(name);
         if (value == null || value.isJsonNull()) return null;
         if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString())
@@ -46,6 +51,11 @@ public final class RoomJsonCodec {
 
     public record CreateRequest(String name, String token) {}
     public record MoveRequest(String from, String to, String promotion, String token) {}
+    public record UpdatePlayerProfileRequest(String name, String token) {}
+
+    public String serializePlayerProfile(User player, String token) {
+        return gson.toJson(new PlayerProfileResponse(user(player), token));
+    }
 
     public String snapshot(Room room, User viewer, String token, String message, boolean whiteConnected, boolean blackConnected) {
         Board board = room == null ? Board.initial() : room.game().state().board();
@@ -93,4 +103,5 @@ public final class RoomJsonCodec {
                             UserView white, UserView black, List<MoveView> moves) {}
     private record MoveView(String from, String to, String promotion) {}
     private record ErrorResponse(String message, String token) {}
+    private record PlayerProfileResponse(UserView profile, String token) {}
 }

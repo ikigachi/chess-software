@@ -48,7 +48,7 @@ public final class GameApiHandler {
         String body = jsonBody(context);
         if (body == null) return;
         var request = codec.createRequest(body);
-        var session = sessions.get(context);
+        var session = sessions.getOrCreateSession(context);
         if (!session.token.equals(request.token())) {
             error(context, 403, ApiMessages.INVALID_TOKEN);
             return;
@@ -66,7 +66,7 @@ public final class GameApiHandler {
         String body = jsonBody(context);
         if (body == null) return;
         var request = codec.moveRequest(body);
-        var session = sessions.get(context);
+        var session = sessions.getOrCreateSession(context);
         if (!session.token.equals(request.token())) {
             error(context, 403, ApiMessages.INVALID_TOKEN);
             return;

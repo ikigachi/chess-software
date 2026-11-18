@@ -8,7 +8,7 @@ Este documento se escribe en español por petición expresa del usuario. El cód
 
 ## 1. Punto de partida comprobado
 
-La referencia versionada sigue siendo el commit `bea23d9`, ya subido a GitHub. El cambio local de persistencia SQLite de perfiles está implementado y verificado, sin commit. La ejecución más reciente registra 116 pruebas, sin fallos ni errores; también se ha comprobado el reinicio del proceso real de jugadores. La tabla siguiente describe ese árbol de trabajo.
+La referencia versionada es el commit `74558e1`, ya subido a GitHub con la persistencia SQLite y el plan. El paso 2.1 está implementado y verificado localmente, sin commit. La ejecución más reciente registra 124 pruebas, sin fallos ni errores. La tabla siguiente describe ese árbol de trabajo.
 
 | Elemento | Situación actual |
 | --- | --- |
@@ -81,7 +81,7 @@ No se fijan fechas ni un número obligatorio de commits: cada fila siguiente pro
 
 ### Fase 1. Persistir los perfiles
 
-**Estado:** pasos 1.1 y 1.2 implementados y verificados en el árbol local, pendientes de commit. Las pruebas cubren el contrato compartido, la conservación del nombre tras reiniciar, los fallos de escritura y los datos almacenados inválidos.
+**Estado:** pasos 1.1 y 1.2 completados y guardados en el commit `74558e1`. Las pruebas cubren el contrato compartido, la conservación del nombre tras reiniciar, los fallos de escritura y los datos almacenados inválidos.
 
 **Objetivo:** conservar el nombre al reiniciar `player-service` y mantener los identificadores ya utilizados.
 
@@ -97,6 +97,8 @@ No trasladar JDBC a `chess-core` ni hacer que `player-service` dependa de las cl
 **Cierre:** renombrar, reiniciar el servicio y recuperar el mismo nombre e identificador; un fallo de escritura conserva el perfil anterior. Las partidas de SQLite siguen intactas.
 
 ### Fase 2. Conectar el perfil con la interfaz
+
+**Estado:** paso 2.1 implementado y verificado localmente, pendiente de commit. El paso 2.2 sigue pendiente. La API permite recuperar el nombre realmente guardado si la confirmación de una escritura no llega correctamente.
 
 **Objetivo:** que el usuario pueda guardar su nombre desde Regalia sin alterar los nombres de encuentros anteriores.
 
@@ -274,7 +276,7 @@ El plan se actualizará si cambia el enunciado o una comprobación revela otra d
 
 ## 8. Siguiente acción concreta
 
-El próximo trabajo de código es **el paso 2.1: una operación de perfil protegida por la sesión y el token actuales**, que permita conectar después el cambio de nombre con la interfaz. La persistencia de perfiles de la fase 1 ya está implementada y verificada localmente; se guardará en un commit cuando el usuario lo solicite.
+El próximo trabajo de código es **el paso 2.2: conectar la edición del nombre de perfil con la interfaz**. El paso 2.1 ya ofrece `GET /api/profile` y `PUT /api/profile` con control de sesión y token, y queda pendiente de commit.
 
 La creación de este documento no implementa estas fases ni crea un commit.
 

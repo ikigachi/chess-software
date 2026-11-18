@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 public final class BrowserSessions {
@@ -28,21 +29,16 @@ public final class BrowserSessions {
         this.clock = Objects.requireNonNull(clock);
     }
 
-    Session get(Context context) {
-        String cookie = context.header("Cookie");
-        String credential = null;
-        if (cookie != null) for (String part : cookie.split(";")) {
-            String[] pair = part.strip().split("=", 2);
-            if (pair.length == 2 && pair[0].equals("regalia")) credential = pair[1];
-        }
+    Session getOrCreateSession(Context context) {
+        String credential = readSessionCredential(context);
         long now = clock.millis();
         sessions.values().removeIf(value -> now - value.lastSeen > SESSION_TIMEOUT);
-        boolean issueCookie = !isSessionCredential(credential);
+        boolean issueCookie = !isCanonicalSessionCredential(credential);
         if (issueCookie) credential = UUID.randomUUID().toString();
         Session session = sessions.get(credential);
         if (session == null) {
             if (sessions.size() >= 512) throw new IllegalStateException("Too many local sessions");
-            session = new Session(players.resolve(credential));
+            session = new Session(players.resolve(credential), credential);
             sessions.put(credential, session);
         }
         if (issueCookie) {
@@ -50,6 +46,27 @@ public final class BrowserSessions {
         }
         session.lastSeen = now;
         return session;
+    }
+
+    Optional<Session> findActiveSession(Context context) {
+        String credential = readSessionCredential(context);
+        Session session = credential == null ? null : sessions.get(credential);
+        if (session == null || clock.millis() - session.lastSeen > SESSION_TIMEOUT) return Optional.empty();
+        return Optional.of(session);
+    }
+
+    void markSessionActive(Session session) {
+        session.lastSeen = clock.millis();
+    }
+
+    private String readSessionCredential(Context context) {
+        String cookie = context.header("Cookie");
+        String credential = null;
+        if (cookie != null) for (String part : cookie.split(";")) {
+            String[] pair = part.strip().split("=", 2);
+            if (pair.length == 2 && pair[0].equals("regalia")) credential = pair[1];
+        }
+        return credential;
     }
 
     boolean isPresent(String code, User user) {
@@ -62,7 +79,7 @@ public final class BrowserSessions {
         return false;
     }
 
-    private static boolean isSessionCredential(String value) {
+    private static boolean isCanonicalSessionCredential(String value) {
         if (value == null || value.length() != 36) return false;
         try {
             return value.equals(UUID.fromString(value).toString());
@@ -73,9 +90,13 @@ public final class BrowserSessions {
 
     static final class Session {
         final String token = UUID.randomUUID().toString();
+        final String credential;
         User user;
         String code;
         long lastSeen;
-        Session(User user) { this.user = Objects.requireNonNull(user); }
+        Session(User user, String credential) {
+            this.user = Objects.requireNonNull(user);
+            this.credential = Objects.requireNonNull(credential);
+        }
     }
 }

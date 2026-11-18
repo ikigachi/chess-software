@@ -31,7 +31,7 @@ public final class RoomApiHandler implements Handler {
     @Override public void handle(Context context) throws IOException {
         BrowserSessions.Session session = null;
         try {
-            session = sessions.get(context);
+            session = sessions.getOrCreateSession(context);
             if (context.path().equals("/api/state")) {
                 snapshot(context, session, current(session), "");
                 return;

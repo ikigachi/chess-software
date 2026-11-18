@@ -2,7 +2,7 @@ package software.ulpgc.chess.gameservice;
 
 import io.javalin.Javalin;
 import org.junit.jupiter.api.Test;
-import software.ulpgc.chess.gameservice.infrastructure.adapters.HttpPlayerIdentity;
+import software.ulpgc.chess.gameservice.infrastructure.adapters.HttpPlayerService;
 
 import java.net.URI;
 import java.util.List;
@@ -11,14 +11,14 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class HttpPlayerIdentityTest {
+class HttpPlayerServiceTest {
     @Test void rejectsUnsuccessfulMalformedIncompleteAndOversizedServiceResponses() {
         AtomicInteger status = new AtomicInteger(200);
         AtomicReference<String> body = new AtomicReference<>();
         Javalin service = Javalin.create(config -> config.routes.post("/players/resolve", context ->
                 context.status(status.get()).contentType("application/json").result(body.get())))
                 .start("127.0.0.1", 0);
-        try (var identity = new HttpPlayerIdentity(URI.create("http://127.0.0.1:" + service.port()))) {
+        try (var identity = new HttpPlayerService(URI.create("http://127.0.0.1:" + service.port()))) {
             for (String invalid : List.of("{", "[]", "null", "{}", "{\"id\":\"player\",\"name\":\"\"}",
                     "{\"id\":42,\"name\":true}", "x".repeat(8193))) {
                 body.set(invalid);

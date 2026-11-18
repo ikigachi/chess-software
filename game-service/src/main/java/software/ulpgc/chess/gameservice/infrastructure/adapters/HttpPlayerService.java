@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.Strictness;
 import software.ulpgc.chess.application.domain.model.User;
 import software.ulpgc.chess.gameservice.application.ports.PlayerIdentity;
+import software.ulpgc.chess.gameservice.application.ports.PlayerProfileUpdater;
 
 import java.io.IOException;
 import java.net.URI;
@@ -17,24 +18,32 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Set;
 
-public final class HttpPlayerIdentity implements PlayerIdentity, AutoCloseable {
-    private final URI endpoint;
+public final class HttpPlayerService implements PlayerIdentity, PlayerProfileUpdater, AutoCloseable {
+    private final URI service;
     private final HttpClient client;
     private final Gson gson = new GsonBuilder().setStrictness(Strictness.STRICT).create();
 
-    public HttpPlayerIdentity(URI service) {
+    public HttpPlayerService(URI service) {
         if (service == null || !Set.of("http", "https").contains(service.getScheme()) || service.getHost() == null
                 || service.getRawUserInfo() != null || service.getRawQuery() != null || service.getRawFragment() != null
                 || !Set.of("", "/").contains(service.getPath()))
             throw new IllegalArgumentException("Player service must be an HTTP origin.");
-        endpoint = service.resolve("/players/resolve");
+        this.service = service;
         client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
     }
 
     @Override public User resolve(String credential) {
-        var request = HttpRequest.newBuilder(endpoint).timeout(Duration.ofSeconds(4))
+        return sendPlayerServiceRequest("/players/resolve", "POST", new ResolveRequest(credential));
+    }
+
+    @Override public User updateDisplayName(String credential, String name) {
+        return sendPlayerServiceRequest("/players/name", "PUT", new UpdateNameRequest(credential, name));
+    }
+
+    private User sendPlayerServiceRequest(String path, String method, Object payload) {
+        var request = HttpRequest.newBuilder(service.resolve(path)).timeout(Duration.ofSeconds(4))
                 .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(new ResolveRequest(credential)), StandardCharsets.UTF_8)).build();
+                .method(method, HttpRequest.BodyPublishers.ofString(gson.toJson(payload), StandardCharsets.UTF_8)).build();
         try {
             var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
             try (var input = response.body()) {
@@ -63,4 +72,5 @@ public final class HttpPlayerIdentity implements PlayerIdentity, AutoCloseable {
     @Override public void close() { client.close(); }
 
     private record ResolveRequest(String credential) {}
+    private record UpdateNameRequest(String credential, String name) {}
 }
