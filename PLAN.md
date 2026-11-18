@@ -8,7 +8,7 @@ Este documento se escribe en español por petición expresa del usuario. El cód
 
 ## 1. Punto de partida comprobado
 
-El commit previo a este cambio es `d4d201e`, ya subido a GitHub con el despliegue Docker y su verificación. Este cambio completa el paso 3.3: traslada las pruebas y retira el módulo `chess-backend`. Una compilación limpia mantiene 127 pruebas Java, ahora 123 sin Docker y cuatro del despliegue; las comprobaciones de API están en `game-service` y las de frontend y NGINX en `chess-frontend`. El recorrido manual del usuario ya había confirmado perfiles, salas, turnos, movimientos rechazados, nombres históricos y recuperación tras reinicios y caídas. Las pruebas reproducibles utilizan Java, HttpClient, JUnit y Maven, sin Python.
+La referencia versionada es `da1a31a`, ya subida a GitHub con la retirada de `chess-backend` y el traslado de sus pruebas. El paso 4.1 está completado localmente, sin commit: el README define los contratos de sala, partida, participante y actor, la propiedad futura de los datos y la migración. Una nueva prueba entre dos salas verifica los permisos por identidad y su independencia de la sala que se está viendo. La ejecución de este paso pasa 124 pruebas Java sin Docker; las cuatro pruebas Docker pasaron en el paso anterior. El runtime y las bases actuales no cambian.
 
 | Elemento | Situación actual |
 | --- | --- |
@@ -140,6 +140,8 @@ La migración de pruebas y la retirada del gateway Java están realizadas en el 
 **Cierre:** dos usuarios crean, se unen, juegan y reabren una partida entrando por NGINX. El arranque documentado ya no requiere el gateway Java y funciona desde una copia limpia.
 
 ### Fase 4. Preparar los límites antes de mover salas
+
+**Estado:** paso 4.1 definido y verificado localmente, pendiente de commit. El README distingue contratos actuales de requisitos de la extracción: identificadores, nombres históricos, pertenencia, sala vista, actor de sesión y futura cuenta autenticada. Especifica entradas y garantías de creación de partida, asignación de negras, consulta y movimiento entre servicios, ejemplos de éxito y rechazo y una migración que conserva datos e identificadores. La nueva prueba HTTP confirma que un token válido y un identificador declarado no permiten mover en otra sala, mientras un participante sí puede mover en una sala propia que no esté viendo. No se han añadido servicios, puertos sin uso ni cambios de esquema.
 
 **Objetivo:** definir la propiedad de los datos y la identidad que recibe cada operación, sin romper la transacción actual.
 
@@ -282,7 +284,7 @@ El plan se actualizará si cambia el enunciado o una comprobación revela otra d
 
 ## 8. Siguiente acción concreta
 
-Completado el paso 3.3, el siguiente paso del plan es **el 4.1: concretar los contratos de sala, partida, participante y actor autenticado**, antes de separar encuentros y partidas. Se mantienen la transacción actual de sala y movimientos y las identidades existentes. Consul y las réplicas quedan para un paso posterior con los contratos de estado y concurrencia preparados.
+El paso 4.1 queda listo para un commit independiente: **`Define room game and identity contracts`**. El siguiente trabajo es **el 4.2: preparar la separación entre acceso a partidas y coordinación de salas dentro del servicio actual**, conservando el guardado atómico de sala y movimientos. Las operaciones internas distribuidas, la autenticación de cuentas y la deduplicación definidas en el README siguen siendo requisitos para fases posteriores, no funcionalidades ya desplegadas.
 
 La creación de este documento no implementa estas fases ni crea un commit.
 

@@ -231,6 +231,72 @@ The creator receives a six-character room code and plays White. The second user 
 
 The server rejects moves that leave the moving player's king in check or attempt to capture the opposing king. Both players see which king is in check and can review the final position and move history after checkmate or stalemate. When a pawn reaches its last rank, the browser asks the player to choose a promotion piece. En passant is available on the immediate reply to an opposing pawn's double step. To castle, select the king and move it two squares toward the rook. The server checks castling rights, the path and the king's safety.
 
+### Room, game and identity contracts
+
+These contracts describe the current application and the constraints for separating matches from games. `matches-service` and account authentication are planned; they are not running services yet.
+
+| Concept | Identity and guarantees |
+| --- | --- |
+| Room | `Room.code()` identifies the shared encounter and its two seats. Creating a room assigns White; entering with a different player can assign Black. Reopening with an existing participant preserves that participant, game and history. |
+| Game | `Game.id()` identifies the chess game; `State` and ordered `Move` values determine its position and result. Current creation uses the room code as the game identifier, and `/games/{id}` currently looks up that room code. Existing identifiers and URLs must remain usable during extraction. |
+| Participant | The `User` stored in `Room.white()` or `Room.black()` records a stable player identifier and the name used when taking that seat. Membership compares identifiers; a matching name grants no membership. A profile rename cannot replace this historical value. |
+| Profile | `player-service` owns the current public name for a stable `User.id()`. Its name may differ from the names in recorded encounters. The player repository never writes rooms or moves. |
+| Acting player | The HTTP adapter resolves the current player from the server-side browser session. A write also checks that session's token. Browser-supplied `userId`, `id`, names or another session's token cannot select the actor. These are guest sessions, not authenticated accounts. |
+| Viewed room | The session's current room selects the board returned by `/api/state` and affects presence. It does not allocate a seat or define membership in other rooms. A participant can submit a legal move to a room they belong to while viewing another room. |
+| Account, planned | Registration and authentication will associate an account with the existing player identifier, check that the account is active and resolve its actor on the server. Account credentials and account identifiers will not replace historical player identifiers. |
+
+`User` is the existing immutable identifier-and-name value used for both profiles and historical participants. These roles do not require duplicate `Player` or `Participant` classes at this stage. A distinct actor type or internal service port will be introduced when an implemented use case needs its contract.
+
+| Operation | Preconditions and result | Rejection and failure guarantees |
+| --- | --- | --- |
+| Create | A valid creator and an unused room code produce a waiting room and initial game in one local save. | Invalid input or an explicit duplicate code leaves existing rooms unchanged. The current public `POST /games` generates a code; it has no retry key and must not be described as idempotent. |
+| Enter or reopen | A non-member can take the free Black seat. `EnterRoomUseCase` returns the existing room for an already seated identifier, even if its current profile name differs. | A third player or missing room is rejected without assigning a seat or changing the game. Direct `Room.join` remains stricter and rejects an identifier already seated. |
+| Move | The acting identifier must occupy a seat, both players must be present in the room model, its color must have the turn and the move must satisfy the chess rules. | A rejected move preserves participants, position, turn and history. Possessing a room code or a valid token for another session does not authorize a move. Online presence is not an additional chess permission. |
+| Query a game | `GET /games/{id}` returns the game for a known code without joining, creating a session or changing the viewer's selected room. | A missing game returns `404` and does not create one. The current read policy allows anyone with the code to consult this endpoint; changing that policy belongs to the account and history work. |
+| Query viewer state | `/api/state` returns the selected room or a board preview, and manages the browser session and presence. | This operation can initialize a session; it does not create a room, record a move or perform hidden room recovery. |
+| Update profile | An active session, its token and a valid name select the session's player profile. A valid service response refreshes that session's cached name. | Identity and historical participants remain unchanged. A lost acknowledgement may follow a successful remote write; query `/api/profile` before another attempt rather than claiming that the remote write was rolled back. |
+
+`RoomRepository.save` is currently the persistence boundary for both the room and its complete move history. SQLite commits these values together and rolls back a failed write. `Main` injects that repository into the use cases. The HTTP server serializes operations within one process; the repository port currently provides no compare-and-set version or multi-process coordination guarantee. Running more game-service replicas therefore requires additional session and concurrency work.
+
+Examples checked by the current contracts:
+
+| Situation | Expected result |
+| --- | --- |
+| Alice saves a new profile name and reopens an earlier room | Same player identifier and seat; the room retains its original participant name and moves. |
+| Another identifier uses the name Alice | The name gives no authority over Alice's games. |
+| Bob belongs to room A and sends his valid token plus Alice's claimed `userId` to move in room B | Rejected with `400`; both rooms and both existing viewer states are preserved. |
+| Bob sends Alice's token with Bob's browser cookie | Rejected with `403`; the token is bound to its own session. |
+| Alice belongs to rooms A and B, views B, then submits a legal move to A | Only A's game advances; B stays selected and unchanged, and A retains its recorded participants. |
+| A game response is lost after a move may have been saved | Read the game and ordered history before retrying. The current move endpoint has no operation-key deduplication contract. |
+
+`GameHttpIntegrationTest.movingUsesRoomMembershipRatherThanTheViewedRoomOrClaimedPlayerIdentity` checks the two-room cases. The existing room use-case, repository, profile and HTTP checks cover reopening, historical names, rejected writes and read-only game queries.
+
+### Planned ownership and extraction sequence
+
+The target owner of room codes, seats, participant snapshots, encounter creation time and the game reference is `matches-service`. `game-service` will own chess state, moves and result, and must have a verified assignment of the player identifier authorized for each color. `player-service` remains the profile owner. Until the extraction is implemented, the current `Room` aggregate and the room-and-move transaction remain together in `game-service`.
+
+Participant assignment in a future game-service boundary will be an authenticated internal operation. Public clients will not configure authorized players by supplying identifiers. The inbound adapter must resolve a verified actor before invoking an application operation; internal authentication and the concrete port will be selected when those callers are implemented. Reads must not trigger internal participant updates or acquire cross-service locks.
+
+The planned application-level operations at that boundary are:
+
+| Planned operation | Required input | Guarantee |
+| --- | --- | --- |
+| Create a game | Stable operation key, requested game identifier and the reserved White player identifier, from the trusted encounter coordinator | The same key and payload return the same game. A conflicting key or payload cannot replace an existing game or White assignment. |
+| Assign Black | Stable operation key, game identifier and the reserved Black player identifier, from the trusted encounter coordinator | White and Black must differ. Black is assigned once; replaying the same completed operation returns its outcome, while another player cannot replace the occupied seat. |
+| Read a game | Game identifier and the actor required by the eventual read policy | Return the game, assigned player identifiers, current state and ordered history without changing seats or recovering pending operations. |
+| Submit a move | Game identifier, server-verified acting player, move, expected move count and stable operation key | Check membership, turn, expected state and chess rules. A repeated completed operation returns its outcome; a conflicting state or payload is rejected without appending another move. |
+
+These requirements belong to the future extraction. They do not add endpoints or promise operation-key support in the current HTTP API.
+
+The migration must preserve these steps:
+
+1. Prepare separate room-coordination and game-access operations inside the current process, keeping the same transaction and behavior. No service may start writing another service's tables.
+2. Preserve the mapping between every existing room code and game identifier, participant identifiers and recorded names, creation time and ordered moves. Historical names come from the stored room, not the current profile. Any schema or identifier change needs an explicit, versioned migration; existing files and Docker volumes must not be deleted or silently replaced.
+3. Before distributing creation or joining, implement stable operation keys, retry handling and a visible incomplete state when necessary. A retry with the same key and payload must return the same outcome; a conflicting payload must be rejected. Reserve a seat once, and never report a room as ready until its game and authorized participants agree.
+4. Verify failures after game creation, after seat reservation and after a write whose response is lost. A retry or explicit recovery must complete or report the incomplete operation without duplicate games, changed seats or lost moves. Queries stay read-only. Cut over to one writer per data set only after this behavior and a recovery procedure have been checked; retain the previous storage for recovery during the migration.
+
+These are extraction requirements, not guarantees already offered by independent services. Registration will first provide the account-to-player association needed for the planned authenticated actor. The current local transaction remains authoritative until distributed failure handling is implemented and verified.
+
 ## Incorporated idea
 
 Players can reopen a room with its shared code and continue their game, even after restarting the server. Use the original browser sessions and keep their cookies to retain each player's seat. After restarting, reload Regalia and join again with the room code.
@@ -259,7 +325,7 @@ Run the Java checks that do not require Docker from the repository root:
 mvn test
 ```
 
-The latest clean Java run passed 127 tests: 123 checks without Docker and four Docker deployment checks. The Docker checks are skipped unless explicitly enabled. `GameHttpIntegrationTest` in `game-service` checks the API directly using separate game and player HTTP servers. Its 32 cases retain the room, profile, session, JSON, concurrency, promotion, en passant, castling, result and restart checks from the former gateway suite. Room and player repository contract tests run against SQLite and in-memory storage; storage tests cover rejected writes, invalid stored data and recovery. Docker checks in `chess-frontend` cover frontend hosting and HTTP forwarding, including the migrated markup, script and piece-asset checks. An unavailable game service produces `503` while the page remains accessible. To reproduce recovery, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
+The Java suites contain 128 cases: 124 checks without Docker and four opt-in deployment checks. The latest contract-verification run passed the 124 non-Docker cases and skipped the four Docker cases; those four passed in the preceding gateway-migration run. `GameHttpIntegrationTest` in `game-service` checks the API directly using separate game and player HTTP servers. Its 33 cases include the room, profile, session, JSON, concurrency, promotion, en passant, castling, result and restart checks from the former gateway suite, plus the two-room identity contract. Room and player repository contract tests run against SQLite and in-memory storage; storage tests cover rejected writes, invalid stored data and recovery. Docker checks in `chess-frontend` cover frontend hosting and HTTP forwarding, including the migrated markup, script and piece-asset checks. An unavailable game service produces `503` while the page remains accessible. To reproduce recovery, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 

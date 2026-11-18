@@ -456,6 +456,40 @@ class GameHttpIntegrationTest {
         assertSame(original, rooms.execute(code));
     }
 
+    @Test void movingUsesRoomMembershipRatherThanTheViewedRoomOrClaimedPlayerIdentity() throws Exception {
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        String firstCode = data(createGame(white, whiteToken, "Alice")).get("id").getAsString();
+        assertEquals(200, post(black, Map.of("token", blackToken, "action", "join", "name", "Bob", "code", firstCode)).statusCode());
+        Room firstRoom = rooms.execute(firstCode);
+        String secondCode = data(createGame(white, whiteToken, "Alice in another room")).get("id").getAsString();
+        try (HttpClient other = browser()) {
+            assertEquals(200, post(other, Map.of("token", token(other), "action", "join", "name", "Carol", "code", secondCode)).statusCode());
+            Room secondRoom = rooms.execute(secondCode);
+            var blackBefore = data(get(black, "/api/state"));
+            var whiteBefore = data(get(white, "/api/state"));
+
+            var claimedIdentity = putGame(black, secondCode, Map.of("token", blackToken,
+                    "userId", secondRoom.white().id(), "from", "e2", "to", "e4"));
+            assertEquals(400, claimedIdentity.statusCode());
+            assertEquals(403, putGame(black, secondCode, Map.of("token", whiteToken, "from", "e2", "to", "e4")).statusCode());
+            assertSame(firstRoom, rooms.execute(firstCode));
+            assertSame(secondRoom, rooms.execute(secondCode));
+            assertEquals(blackBefore, data(get(black, "/api/state")));
+            assertEquals(whiteBefore, data(get(white, "/api/state")));
+
+            var played = putGame(white, firstCode, Map.of("token", whiteToken, "from", "e2", "to", "e4"));
+
+            assertEquals(200, played.statusCode());
+            assertEquals(1, data(played).getAsJsonObject("room").getAsJsonArray("moves").size());
+            assertEquals("Alice", data(played).getAsJsonObject("room").getAsJsonObject("white").get("name").getAsString());
+            assertEquals(whiteBefore, data(get(white, "/api/state")));
+            assertSame(secondRoom, rooms.execute(secondCode));
+            assertEquals(firstRoom.white(), rooms.execute(firstCode).white());
+            assertEquals(firstRoom.black(), rooms.execute(firstCode).black());
+        }
+    }
+
     @Test void createsAGameFromJsonAndReturnsItsRetrievableLocation() throws Exception {
         String whiteToken = token(white);
         var response = createGame(white, whiteToken, " Zoë ");
