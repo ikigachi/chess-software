@@ -19,7 +19,7 @@ public class Main {
         ResolvePlayerUseCase resolve = new ResolvePlayerUseCase(repository);
         PlayerHttpServer server = new PlayerHttpServer(port, new PlayerApiHandler(resolve, new RenamePlayerUseCase(resolve, repository)));
         Runtime.getRuntime().addShutdownHook(new Thread(server::close));
-        server.start();
+        server.start(args.length > 2 ? args[2] : "127.0.0.1");
         System.out.println("Player service: " + server.uri());
     }
 }

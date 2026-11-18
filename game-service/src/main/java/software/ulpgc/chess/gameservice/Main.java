@@ -29,7 +29,7 @@ public class Main {
                 server.close();
                 players.close();
             }));
-            server.start();
+            server.start(args.length > 3 ? args[3] : "127.0.0.1");
             System.out.println("Game service: " + server.uri());
         } catch (Exception exception) {
             players.close();

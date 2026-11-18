@@ -8,7 +8,7 @@ Este documento se escribe en español por petición expresa del usuario. El cód
 
 ## 1. Punto de partida comprobado
 
-La referencia versionada es el commit `e3cdb46`, ya subido a GitHub con la API protegida de perfil del paso 2.1. El paso 2.2 está implementado y verificado localmente, sin commit. Se han comprobado 124 pruebas Java y seis pruebas JavaScript, sin fallos ni errores, y el formulario en navegador con bases temporales y reinicio del servicio de jugadores. La tabla siguiente describe ese árbol de trabajo.
+El commit previo a este cambio es `f622d3a`, ya subido a GitHub con la edición del perfil desde la interfaz del paso 2.2. Este cambio completa los pasos 3.1 y 3.2: Compose construye y arranca NGINX y los dos servicios Java, con volúmenes independientes. Pasan 127 pruebas Java, incluidas tres del despliegue Docker, y seis pruebas JavaScript. El usuario también ha confirmado el recorrido manual con dos navegadores, perfiles, turnos, movimientos rechazados, nombres históricos, reinicios y recuperación tras detener el servicio. La verificación reproducible de contenedores utiliza Java, HttpClient, JUnit y Maven; no necesita Python.
 
 | Elemento | Situación actual |
 | --- | --- |
@@ -16,11 +16,12 @@ La referencia versionada es el commit `e3cdb46`, ya subido a GitHub con la API p
 | `game-service` | Salas, sesiones, movimientos y persistencia de salas y partidas en SQLite; puerto 8081 |
 | `player-service` | Identidades estables y operaciones sobre nombres de perfil; perfiles persistentes en SQLite; puerto 8082 |
 | `chess-backend` | Sirve el frontend y reenvía peticiones al servicio de partidas; puerto 8080 |
+| Docker Compose | NGINX sirve el frontend y reenvía `/api` y `/games` a `game-service`; `player-service` resuelve perfiles en otro contenedor; un volumen propio por servicio Java y solo el puerto web publicado |
 | `chess-frontend` | HTML, CSS, JavaScript y piezas SVG; no necesita un proceso Node.js |
 | Comunicación | Servidores Java con Javalin; JSON para crear y mover partidas; formularios todavía para unirse, refrescar y dejar de ver una sala |
 | Perfiles | Consulta y guardado explícito desde la interfaz mediante la API protegida; nombre de perfil separado del registrado en cada encuentro |
 | Historial | Movimientos persistentes y consulta de partida por código; todavía no hay una pantalla de listado de encuentros anteriores |
-| Otros servicios | `matches-service`, registro, autenticación y NGINX todavía no están implementados |
+| Otros servicios | `matches-service`, registro y autenticación todavía no están implementados |
 | ActiveMQ | No está incorporado ni se ha confirmado como requisito obligatorio |
 
 Ya funcionan la creación y unión a salas, los turnos, la sincronización por consultas periódicas, los avisos de desconexión, la recuperación de partidas y la conservación de participantes históricos tras cambiar un perfil.
@@ -98,7 +99,7 @@ No trasladar JDBC a `chess-core` ni hacer que `player-service` dependa de las cl
 
 ### Fase 2. Conectar el perfil con la interfaz
 
-**Estado:** paso 2.1 guardado en el commit `e3cdb46`. Paso 2.2 implementado y verificado localmente, pendiente de commit. El formulario diferencia el perfil del nombre del encuentro, conserva los borradores del nombre de sala y consulta el perfil si falla la confirmación. Si tampoco puede consultarlo, exige cargar el nombre guardado antes de otro intento. Se han comprobado entradas inválidas, nombres históricos, reinicio del servicio y presentación en móvil.
+**Estado:** paso 2.1 guardado en el commit `e3cdb46` y paso 2.2 en `f622d3a`, ambos subidos a GitHub. El formulario diferencia el perfil del nombre del encuentro, conserva los borradores del nombre de sala y consulta el perfil si falla la confirmación. Si tampoco puede consultarlo, exige cargar el nombre guardado antes de otro intento. Se han comprobado entradas inválidas, nombres históricos, reinicio del servicio y presentación en móvil.
 
 **Objetivo:** que el usuario pueda guardar su nombre desde Regalia sin alterar los nombres de encuentros anteriores.
 
@@ -117,6 +118,8 @@ Si un cambio remoto se confirma pero se pierde su respuesta, consultar el perfil
 
 ### Fase 3. Introducir NGINX
 
+**Estado:** pasos 3.1 y 3.2 completados y verificados en este cambio. Compose arranca NGINX y los dos servicios Java; Maven compila dentro de Docker y cada servicio conserva su SQLite en un volumen propio. NGINX es software configurado en un contenedor, sin módulo Java adicional. Las tres pruebas Java de Docker comprueban sesiones, creación y unión a sala, movimientos, perfiles, cabeceras, errores, límite de cuerpo y un servicio sin respuesta. Tras recrear ambos contenedores Java recuperan la identidad y la partida y registran otro movimiento. El recorrido manual del usuario también ha confirmado esos flujos principales y la recuperación tras una caída. La escucha en contenedor usa `0.0.0.0` sin publicar los puertos Java; el arranque directo conserva `127.0.0.1`. El paso 3.3 mantiene pendiente trasladar las pruebas existentes y retirar `chess-backend`.
+
 **Objetivo:** utilizar NGINX como entrada HTTP, sirviendo los archivos web y reenviando las llamadas al servicio adecuado.
 
 | Paso | Trabajo | Posible commit |
@@ -125,7 +128,9 @@ Si un cambio remoto se confirma pero se pierde su respuesta, consultar el perfil
 | 3.2 | Comprobar cookies, JSON, errores, límites de cuerpo y tiempos de espera a través de NGINX | `Verify NGINX routing and service failure responses` |
 | 3.3 | Trasladar las comprobaciones que correspondan y retirar `chess-backend` cuando sus responsabilidades estén cubiertas | `Replace the Java gateway with NGINX` |
 
-La configuración puede vivir en `infrastructure/nginx/nginx.conf`, creando la carpeta cuando exista el archivo. El usuario ha autorizado ejecutar NGINX con Docker; comprobar primero la disponibilidad de Docker en el entorno Windows y preparar una ejecución reproducible. No hace falta volver a confirmar la elección de Docker para este componente.
+La configuración está en `infrastructure/nginx/default.conf.template` y se ejecuta desde el `compose.yaml` de la raíz. El Dockerfile tiene una etapa de compilación y destinos separados para `player-service` y `game-service`, con JDK 27 y bases fijadas por digest. Los nombres de Compose resuelven las conexiones dentro de la red Docker. El despliegue se ha comprobado en Docker Desktop con contenedores Linux en Windows.
+
+Las indicaciones de kata 5 sobre Consul, dos upstreams, réplicas y `/health` se incorporarán cuando se preparen sus garantías. Este despliegue ejecuta una instancia de cada servicio. Antes de replicar `game-service` hay que resolver las sesiones en memoria y la coordinación de operaciones sobre una partida; no se obtiene esa garantía solo al duplicar contenedores.
 
 Inicialmente, `/games` y las operaciones públicas de `/api/` seguirán llegando a `game-service`. El endpoint interno que recibe credenciales de jugador no se publicará automáticamente por tener un prefijo `/players`.
 
@@ -278,7 +283,7 @@ El plan se actualizará si cambia el enunciado o una comprobación revela otra d
 
 ## 8. Siguiente acción concreta
 
-El paso 2.2 queda listo para un commit independiente: **`Connect display-name editing to the frontend`**. El siguiente paso del plan es **el 3.1: configuración y ejecución local de NGINX con Docker**, ya autorizado por el usuario. Comprobar la disponibilidad del entorno y acordar cualquier otra tecnología adicional que todavía no se haya estudiado. No retirar `chess-backend` hasta cubrir y verificar sus responsabilidades.
+Este cambio cubre **el despliegue de NGINX y los servicios Java con Docker** y **su verificación automatizada con Java**, junto con el recorrido manual confirmado por el usuario. El siguiente paso es **el 3.3: trasladar las comprobaciones existentes de `chess-backend` y retirar el gateway Java** una vez conservada su cobertura. Consul y las réplicas quedan para un paso posterior con los contratos de estado y concurrencia preparados.
 
 La creación de este documento no implementa estas fases ni crea un commit.
 

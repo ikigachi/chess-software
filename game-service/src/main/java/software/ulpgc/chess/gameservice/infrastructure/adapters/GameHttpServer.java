@@ -49,7 +49,8 @@ public final class GameHttpServer implements AutoCloseable {
         });
     }
 
-    public void start() { server.start("127.0.0.1", port); }
+    public void start() { start("127.0.0.1"); }
+    public void start(String bindAddress) { server.start(bindAddress, port); }
     public URI uri() { return URI.create("http://127.0.0.1:" + server.port()); }
 
     @Override public void close() { server.stop(); }

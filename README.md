@@ -16,6 +16,7 @@ Build a chess application where two users connect through a shared room code, pl
 | SQLite JDBC | 3.54.1.0, room and player storage |
 | JUnit Jupiter | 5.11.4, automated tests only |
 | Node.js | 24, optional frontend tests only; no frontend server or npm packages required |
+| Docker and Compose | Builds and runs NGINX and the two Java services; verified with Docker Desktop Linux containers on Windows |
 
 From the repository root:
 
@@ -32,12 +33,55 @@ In IntelliJ, open the root `pom.xml`, select JDK 27 and reload Maven. Use the re
 
 For different ports and database files, start the player service with `8092 .regalia/test-players.sqlite`, the game service with `8091 .regalia/test.sqlite http://127.0.0.1:8092`, and the web server with `8090 http://127.0.0.1:8091`. SQLite files and browser identities from the previous version remain compatible.
 
+### Run the three containers
+
+With Docker running in Linux-container mode and port 8080 available, run these commands from the repository root. The Java services are built inside Docker; this path does not require Java or Maven on the host:
+
+```bash
+docker compose config
+docker compose up --build -d
+docker compose exec nginx nginx -t
+```
+
+Open [Regalia through NGINX](http://127.0.0.1:8080) after the services finish starting. NGINX serves the frontend directly from its source directory and forwards `/api`, `/api/...`, `/games` and `/games/...` to `http://game-service:8081`. The game service calls `http://player-service:8082`. The internal player-service endpoints are not routed. Java remains responsible for sessions, profiles, rules and storage.
+
+`compose.yaml` defines three containers: NGINX, `game-service` and `player-service`. NGINX uses an official image; it is not a Java module. The shared Dockerfile builds the two Java modules with Maven and JDK 27, then copies their classes and runtime dependencies into separate Java 27 runtime images. All base images are pinned by digest. `.dockerignore` includes only the required POM files and Java service sources in the build context.
+
+Only NGINX publishes a host port, bound to `127.0.0.1`. Both Java services listen on `0.0.0.0` inside their containers and communicate through Compose DNS; their ports are not published on the host. NGINX mounts the frontend and its configuration template read-only and resolves the game service through Docker's DNS. See the [Docker networking documentation](https://docs.docker.com/engine/network/).
+
+| Volume | File in its owning container |
+| --- | --- |
+| `players-data` | `/data/players.sqlite`, written only by `player-service` |
+| `rooms-data` | `/data/rooms.sqlite`, written only by `game-service` |
+
+Docker volumes are separate from the `.regalia` files used by direct Java runs. Existing local databases are not imported automatically. The runtime containers use a non-root user, and their volumes preserve profiles, rooms and moves when containers are recreated.
+
+For a web entry point on port 8090, set this variable in PowerShell before starting Compose:
+
+```powershell
+$env:REGALIA_PORT = '8090'
+docker compose up --build -d
+```
+
+Inspect or stop the deployment with:
+
+```bash
+docker compose ps
+docker compose logs
+docker compose down
+```
+
+`docker compose down` stops the containers while retaining their data volumes. The direct Java run configurations remain available: their default bind address is `127.0.0.1`. The player-service third argument and game-service fourth argument optionally select a different bind address. `chess-backend` remains available during the migration; its removal and migration of its existing tests belong to a later step.
+
 ## Delivery structure and main classes
 
 ```text
 ./
 ├── pom.xml
 ├── README.md
+├── Dockerfile
+├── compose.yaml
+├── infrastructure/nginx/default.conf.template
 ├── chess-core/
 │   ├── pom.xml
 │   └── src/
@@ -93,20 +137,20 @@ For different ports and database files, start the player service with `8092 .reg
 
 ```mermaid
 flowchart LR
-    F["Frontend in browser"] -->|"HTTP"| W["Web server: port 8080"]
+    F["Frontend in browser"] -->|"HTTP"| W["NGINX in Docker or Java web server: port 8080"]
     W -->|"HTTP proxy"| G["Game service: port 8081"]
     G -->|"PlayerIdentity via HTTP/JSON"| P["Player service: port 8082"]
     G -->|"RoomRepository via JDBC"| D["Rooms SQLite database"]
     P -->|"PlayerRepository via JDBC"| PD["Players SQLite database"]
 ```
 
-The browser uses the web server as its origin. The web server, game service and player service run in separate Java processes using Javalin. When opening a session, the game service obtains its guest-player identity through the `PlayerIdentity` port and its HTTP adapter. The game service persists rooms in SQLite and manages active browser sessions in memory. The player service persists profile identifiers and names in a separate SQLite file. Browser cookies let the original players reopen a saved room with its code after restarting the services.
+The browser uses one web origin, served either by the NGINX container or the existing Java web server. The game and player services run in separate Java processes using Javalin, with one container per service in Compose. When opening a session, the game service obtains its guest-player identity through the `PlayerIdentity` port and its HTTP adapter. The game service persists rooms in SQLite and manages active browser sessions in memory. The player service persists profile identifiers and names in a separate SQLite file and volume. Browser cookies let the original players reopen a saved room with its code after restarting the services.
 
-Player identity resolution and profile-name operations have been extracted. Names supplied when entering a room, room coordination and browser sessions remain in `game-service` during this step. Matches, registration and authentication services, together with NGINX routing, are pending.
+Player identity resolution and profile-name operations have been extracted, including frontend profile editing. NGINX hosting and routing are available through Compose. Names supplied when entering a room, room coordination and browser sessions remain in `game-service` during this step. Matches, registration and authentication services are pending.
 
 ### Planned service boundaries
 
-This is the target for the next extractions. The current executable system uses the three processes described above. Connecting profile-name changes to the frontend is pending.
+This is the target for the next extractions. Player and game services are implemented; the web entry point can use NGINX or the existing Java gateway. The remaining service extractions are pending.
 
 | Component | Responsibility and data ownership |
 | --- | --- |
@@ -120,7 +164,7 @@ This is the target for the next extractions. The current executable system uses 
 
 A participant record preserves the player identifier and display name used in that match. Account deactivation must end access while preserving recorded matches and moves. A display-name change must not rewrite the names recorded in earlier matches. Services identify the acting user from a verified session, rather than trusting a player identifier supplied by the frontend.
 
-Services communicate through HTTP and JSON using application ports and infrastructure adapters. Each service controls writes to its own data; registration and authentication share account storage. Until room and game storage have been separated with failure handling in place, the existing room-and-move transaction stays in `game-service`. The current `chess-backend` forwarding and file-serving responsibilities will be replaced by NGINX when that routing is implemented.
+Services communicate through HTTP and JSON using application ports and infrastructure adapters. Each service controls writes to its own data; registration and authentication will share account storage. Until room and game storage have been separated with failure handling in place, the existing room-and-move transaction stays in `game-service`. NGINX can already perform the forwarding and file-serving responsibilities of `chess-backend`; the Java module remains until its verification responsibilities have been migrated.
 
 ### Backend hexagonal architecture
 
@@ -218,13 +262,13 @@ Game with recorded moves:
 
 ## Verification
 
-Run all automated checks from the repository root:
+Run the Java checks that do not require Docker from the repository root:
 
 ```bash
 mvn test
 ```
 
-The latest run passed 124 tests. Room and player repository contract tests run against SQLite and in-memory storage. Storage tests cover rejected writes, invalid stored data and recovery. Room tests also check move numbering and foreign-key enforcement on each room connection. HTTP integration tests run the web server, game service and player service separately, exercising Javalin routing, JSON game creation and moves, forwarded cookies, concurrent joining, game queries and actions. Player checks cover compatible identities, invalid service responses, session-protected profile updates, expired sessions, attempts to target another player, recovery after an invalid acknowledgement, persisted names after a service restart and a player-service outage while existing players continue. A SQLite integration check confirms that a new session loads the updated profile without changing participants or moves in the stored game. Move checks cover rejected requests, promotion and recovery after restarting SQLite storage. An unavailable game service produces `503` while the page remains accessible. To reproduce the restart check, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
+The latest full Java run passed 127 tests: 124 existing checks and three Docker deployment checks. The Docker checks are skipped unless explicitly enabled. Room and player repository contract tests run against SQLite and in-memory storage. Storage tests cover rejected writes, invalid stored data and recovery. Room tests also check move numbering and foreign-key enforcement on each room connection. HTTP integration tests run the web server, game service and player service separately, exercising Javalin routing, JSON game creation and moves, forwarded cookies, concurrent joining, game queries and actions. Player checks cover compatible identities, invalid service responses, session-protected profile updates, expired sessions, attempts to target another player, recovery after an invalid acknowledgement, persisted names after a service restart and a player-service outage while existing players continue. A SQLite integration check confirms that a new session loads the updated profile without changing participants or moves in the stored game. Move checks cover rejected requests, promotion and recovery after restarting SQLite storage. An unavailable game service produces `503` while the page remains accessible. To reproduce the restart check, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 
@@ -235,6 +279,16 @@ node --test chess-frontend/src/test/javascript/player-profile.test.mjs
 ```
 
 These tests cover profile responses without board data, explicit profile writes, separate encounter names, lost acknowledgements, rejected names and stale background responses. Browser checks also cover saving and reloading a profile, preserving an edited encounter name and historical participants, rejecting a blank name, recovering after a player-service restart and the mobile layout.
+
+With Docker running, enable the three Java deployment checks:
+
+```bash
+mvn -Dregalia.docker.tests=true test
+```
+
+`DockerDeploymentIntegrationTest` creates its own Compose project, selects a free local port, builds and starts all three containers and checks the generated NGINX configuration. It verifies static files, separate browser cookies, room creation and joining, moves, profile updates, historical names, `Location` and `Allow`, rejected requests and the 8192-byte body boundary. It recreates both Java containers and recovers the same profile, game and moves from their volumes, then continues playing. A stopped game service and a paused, unresponsive game service both produce JSON with status `503`; the frontend remains accessible. The test removes only its own containers and temporary data volumes, and leaves command logs under `chess-backend/target/docker-check-*`. Python is not required to build, run or verify this deployment.
+
+A manual walkthrough with a normal browser window and a private window also confirmed saved profiles, shared rooms, alternating turns, rejected moves, preserved historical participant names and continued play after restarting both Java services. Stopping and starting the game service preserved the recorded moves and allowed the players to reopen their room.
 
 To verify the frontend service boundary, open Regalia and run this in the browser console. The test service should log `null` and `DEMO01` and send no API requests for these calls.
 
