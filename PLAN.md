@@ -8,17 +8,17 @@ Este documento se escribe en español por petición expresa del usuario. El cód
 
 ## 1. Punto de partida comprobado
 
-La referencia versionada es el commit `74558e1`, ya subido a GitHub con la persistencia SQLite y el plan. El paso 2.1 está implementado y verificado localmente, sin commit. La ejecución más reciente registra 124 pruebas, sin fallos ni errores. La tabla siguiente describe ese árbol de trabajo.
+La referencia versionada es el commit `e3cdb46`, ya subido a GitHub con la API protegida de perfil del paso 2.1. El paso 2.2 está implementado y verificado localmente, sin commit. Se han comprobado 124 pruebas Java y seis pruebas JavaScript, sin fallos ni errores, y el formulario en navegador con bases temporales y reinicio del servicio de jugadores. La tabla siguiente describe ese árbol de trabajo.
 
 | Elemento | Situación actual |
 | --- | --- |
 | `chess-core` | Modelo compartido y reglas del ajedrez, sin HTTP, JSON ni JDBC |
 | `game-service` | Salas, sesiones, movimientos y persistencia de salas y partidas en SQLite; puerto 8081 |
-| `player-service` | Identidades estables y operaciones sobre nombres de perfil; perfiles persistentes en SQLite en el cambio local; puerto 8082 |
+| `player-service` | Identidades estables y operaciones sobre nombres de perfil; perfiles persistentes en SQLite; puerto 8082 |
 | `chess-backend` | Sirve el frontend y reenvía peticiones al servicio de partidas; puerto 8080 |
 | `chess-frontend` | HTML, CSS, JavaScript y piezas SVG; no necesita un proceso Node.js |
 | Comunicación | Servidores Java con Javalin; JSON para crear y mover partidas; formularios todavía para unirse, refrescar y dejar de ver una sala |
-| Perfiles | Se pueden consultar y renombrar por la API interna; la interfaz todavía no ofrece esa operación |
+| Perfiles | Consulta y guardado explícito desde la interfaz mediante la API protegida; nombre de perfil separado del registrado en cada encuentro |
 | Historial | Movimientos persistentes y consulta de partida por código; todavía no hay una pantalla de listado de encuentros anteriores |
 | Otros servicios | `matches-service`, registro, autenticación y NGINX todavía no están implementados |
 | ActiveMQ | No está incorporado ni se ha confirmado como requisito obligatorio |
@@ -98,7 +98,7 @@ No trasladar JDBC a `chess-core` ni hacer que `player-service` dependa de las cl
 
 ### Fase 2. Conectar el perfil con la interfaz
 
-**Estado:** paso 2.1 implementado y verificado localmente, pendiente de commit. El paso 2.2 sigue pendiente. La API permite recuperar el nombre realmente guardado si la confirmación de una escritura no llega correctamente.
+**Estado:** paso 2.1 guardado en el commit `e3cdb46`. Paso 2.2 implementado y verificado localmente, pendiente de commit. El formulario diferencia el perfil del nombre del encuentro, conserva los borradores del nombre de sala y consulta el perfil si falla la confirmación. Si tampoco puede consultarlo, exige cargar el nombre guardado antes de otro intento. Se han comprobado entradas inválidas, nombres históricos, reinicio del servicio y presentación en móvil.
 
 **Objetivo:** que el usuario pueda guardar su nombre desde Regalia sin alterar los nombres de encuentros anteriores.
 
@@ -125,7 +125,7 @@ Si un cambio remoto se confirma pero se pierde su respuesta, consultar el perfil
 | 3.2 | Comprobar cookies, JSON, errores, límites de cuerpo y tiempos de espera a través de NGINX | `Verify NGINX routing and service failure responses` |
 | 3.3 | Trasladar las comprobaciones que correspondan y retirar `chess-backend` cuando sus responsabilidades estén cubiertas | `Replace the Java gateway with NGINX` |
 
-La configuración puede vivir en `infrastructure/nginx/nginx.conf`, creando la carpeta cuando exista el archivo. Primero verificar cómo ejecutar NGINX en el entorno Windows disponible. Docker o WSL no se añadirán como dependencia sin necesidad y confirmación.
+La configuración puede vivir en `infrastructure/nginx/nginx.conf`, creando la carpeta cuando exista el archivo. El usuario ha autorizado ejecutar NGINX con Docker; comprobar primero la disponibilidad de Docker en el entorno Windows y preparar una ejecución reproducible. No hace falta volver a confirmar la elección de Docker para este componente.
 
 Inicialmente, `/games` y las operaciones públicas de `/api/` seguirán llegando a `game-service`. El endpoint interno que recibe credenciales de jugador no se publicará automáticamente por tener un prefijo `/players`.
 
@@ -211,6 +211,8 @@ La reproducción visual paso a paso es opcional: consultar el tablero final y su
 
 ### Fase 8. Decidir si incorporar ActiveMQ
 
+El usuario ha autorizado utilizar Docker para ejecutar ActiveMQ cuando se acuerde incorporarlo. Esta elección de entorno no necesita otra confirmación; la función y las garantías del broker se definirán en esta fase.
+
 **Estado:** fase condicional, que requiere necesidad concreta y autorización previa.
 
 NGINX entrega archivos y enruta HTTP; un broker de mensajes cumple otra función. No se interpretará la expresión «broker de NGINX» de los apuntes como una exigencia automática de ActiveMQ. Referencias: [NGINX como servidor y proxy](https://nginx.org/en/docs/beginners_guide.html) y [modelo de direcciones y colas de Artemis](https://artemis.apache.org/components/artemis/documentation/latest/address-model.html).
@@ -240,7 +242,7 @@ El README de entrega seguirá en inglés y centrado en lo evaluable. Incluir las
 
 Documentar cada proceso, sus puertos, el orden de arranque, las dependencias, las rutas relativas de bases y cómo consultar una partida guardada. Separar claramente lo comprobado automáticamente de las comprobaciones manuales.
 
-No convertir Docker, CI, otro framework o un nuevo sistema de configuración en requisitos adicionales sin una razón acordada. No versionar bases de datos generadas, credenciales, rutas personales ni resultados de compilación.
+Docker está autorizado para NGINX y ActiveMQ. Mantener el resto de herramientas, CI, frameworks y configuración ajustados a necesidades acordadas. No versionar bases de datos generadas, credenciales, rutas personales ni resultados de compilación.
 
 **Cierre:** el repositorio público y su rama principal contienen la versión evaluable; el README permite ejecutar y verificar esa versión sin depender de archivos de la máquina del autor.
 
@@ -276,7 +278,7 @@ El plan se actualizará si cambia el enunciado o una comprobación revela otra d
 
 ## 8. Siguiente acción concreta
 
-El próximo trabajo de código es **el paso 2.2: conectar la edición del nombre de perfil con la interfaz**. El paso 2.1 ya ofrece `GET /api/profile` y `PUT /api/profile` con control de sesión y token, y queda pendiente de commit.
+El paso 2.2 queda listo para un commit independiente: **`Connect display-name editing to the frontend`**. El siguiente paso del plan es **el 3.1: configuración y ejecución local de NGINX con Docker**, ya autorizado por el usuario. Comprobar la disponibilidad del entorno y acordar cualquier otra tecnología adicional que todavía no se haya estudiado. No retirar `chess-backend` hasta cubrir y verificar sus responsabilidades.
 
 La creación de este documento no implementa estas fases ni crea un commit.
 

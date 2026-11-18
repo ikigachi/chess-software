@@ -2,7 +2,29 @@ export class RoomApi {
   #token;
 
   async state() {
-    return this.#request('/api/state');
+    return this.#requestRoomSnapshot('/api/state');
+  }
+
+  async loadPlayerProfile() {
+    return this.#requestPlayerProfile();
+  }
+
+  async updatePlayerDisplayName(name) {
+    if (!this.#token) await this.state();
+    return this.#requestPlayerProfile({
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, token: this.#token })
+    });
+  }
+
+  async #requestPlayerProfile(options) {
+    const response = await this.#request('/api/profile', options);
+    if (typeof response.profile?.id !== 'string' || !response.profile.id ||
+        typeof response.profile?.name !== 'string' || !response.profile.name.trim()) {
+      throw new Error('The server returned an invalid player profile.');
+    }
+    return response;
   }
 
   async action(action, fields = {}) {
@@ -19,10 +41,15 @@ export class RoomApi {
       });
       return this.state();
     }
-    return this.#request('/api/action', {
+    return this.#requestRoomSnapshot('/api/action', {
       method: 'POST',
       body: new URLSearchParams({ ...fields, action, token: this.#token })
     });
+  }
+
+  async #requestRoomSnapshot(path, options) {
+    const snapshot = await this.#request(path, options);
+    return { ...snapshot, pieces: new Map(Object.entries(snapshot.pieces)) };
   }
 
   async #request(path, options = {}) {
@@ -35,6 +62,7 @@ export class RoomApi {
     let snapshot;
     try {
       snapshot = await response.json();
+      if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) throw new Error();
     } catch {
       throw new Error('The server returned an invalid JSON response.');
     }
@@ -43,6 +71,6 @@ export class RoomApi {
       if (response.status === 403 && !snapshot.token) this.#token = undefined;
       throw new Error(snapshot.message || 'The request could not be completed.');
     }
-    return { ...snapshot, pieces: new Map(Object.entries(snapshot.pieces)) };
+    return snapshot;
   }
 }

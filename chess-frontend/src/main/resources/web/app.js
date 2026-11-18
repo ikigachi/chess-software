@@ -2,11 +2,15 @@ const find = (selector) => document.querySelector(selector);
 const clone = (id) => find(id).content.firstElementChild.cloneNode(true);
 const board = find('#board');
 const roomForm = find('#room-form');
+const profileForm = find('#profile-form');
 const promotionDialog = find('#promotion-dialog');
 const promotionLetters = { queen: 'Q', rook: 'R', bishop: 'B', knight: 'N' };
 let snapshot;
 let selected = null;
 let busy = true;
+let savedProfile;
+let profileNeedsReload = true;
+let roomNameEdited = false;
 
 function notify(message, error = false) {
   const notice = find('#notice');
@@ -20,6 +24,9 @@ function setBusy(value) {
   document.querySelectorAll('button').forEach((button) => {
     button.disabled = button.hasAttribute('data-square') ? boardLocked() : value;
   });
+  find('#save-profile').disabled = value || profileNeedsReload;
+  find('#profile-name').disabled = value || profileNeedsReload;
+  find('#reload-profile').disabled = value || !snapshot;
 }
 
 function boardLocked() {
@@ -172,7 +179,67 @@ function render() {
   find('#room-code-display').textContent = room?.code || '';
   find('#room-description').textContent = room?.black ? 'Two players, one game. Moves update automatically.'
     : 'Waiting for your opponent. Share this code.';
-  if (!find('#player-name').value && snapshot.viewer.name !== 'Guest') find('#player-name').value = snapshot.viewer.name;
+  if (!roomNameEdited) {
+    const name = savedProfile?.name || snapshot.viewer.name;
+    find('#player-name').value = name === 'Guest' ? '' : name;
+  }
+}
+
+function showProfileStatus(message, error = false) {
+  const status = find('#profile-status');
+  status.textContent = message;
+  status.classList.toggle('error', error);
+}
+
+function applyPlayerProfile(profile, replaceDraft) {
+  savedProfile = profile;
+  profileNeedsReload = false;
+  if (replaceDraft) find('#profile-name').value = profile.name;
+  snapshot = { ...snapshot, viewer: profile };
+  render();
+}
+
+async function loadPlayerProfile(actions) {
+  const response = await actions.loadPlayerProfile();
+  if (!response) return;
+  applyPlayerProfile(response.profile, true);
+  showProfileStatus(`Saved as ${response.profile.name}. Existing games keep their recorded names.`);
+}
+
+async function reloadPlayerProfile(actions) {
+  if (busy) return;
+  setBusy(true);
+  try {
+    await loadPlayerProfile(actions);
+  } catch (error) {
+    profileNeedsReload = true;
+    showProfileStatus(`${error.message} Load the saved name before trying to save.`, true);
+  } finally { setBusy(false); }
+}
+
+async function savePlayerProfile(actions) {
+  if (busy || profileNeedsReload) return;
+  const name = find('#profile-name').value;
+  setBusy(true);
+  showProfileStatus('Saving your profile…');
+  try {
+    const response = await actions.updatePlayerDisplayName(name);
+    if (!response) return;
+    applyPlayerProfile(response.profile, true);
+    showProfileStatus(`Saved as ${response.profile.name}. Existing games keep their recorded names.`);
+  } catch (error) {
+    profileNeedsReload = true;
+    try {
+      const response = await actions.loadPlayerProfile();
+      if (!response) return;
+      const confirmed = response.profile.name === name.trim();
+      applyPlayerProfile(response.profile, confirmed);
+      showProfileStatus(confirmed ? `Saved as ${response.profile.name}. The saved name was confirmed after a connection problem.`
+        : `${error.message} Saved name: ${response.profile.name}.`, !confirmed);
+    } catch {
+      showProfileStatus(`${error.message} The saved name could not be confirmed. Load it before trying to save again.`, true);
+    }
+  } finally { setBusy(false); }
 }
 
 async function performAction(actions, action, fields) {
@@ -266,7 +333,15 @@ async function initialize(actions) {
     snapshot = await actions.load();
     render();
     notify('');
-  } catch (error) { notify(error.message, true); }
+    try {
+      await loadPlayerProfile(actions);
+    } catch (error) {
+      showProfileStatus(`${error.message} Load the saved name before trying to save.`, true);
+    }
+  } catch (error) {
+    notify(error.message, true);
+    showProfileStatus('Refresh the game to reconnect, then load your saved name.', true);
+  }
   finally { setBusy(false); }
 }
 
@@ -280,6 +355,12 @@ export function startApp(actions) {
     const fields = Object.fromEntries(new FormData(roomForm));
     perform(event.submitter?.value || 'create', fields);
   });
+  find('#player-name').addEventListener('input', () => { roomNameEdited = true; });
+  profileForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    savePlayerProfile(actions);
+  });
+  find('#reload-profile').addEventListener('click', () => reloadPlayerProfile(actions));
   find('#refresh-game').addEventListener('click', () => perform('refresh'));
   find('#leave-room').addEventListener('click', () => perform('leave'));
   find('.brand').addEventListener('click', (event) => { event.preventDefault(); showPanel('moves'); });

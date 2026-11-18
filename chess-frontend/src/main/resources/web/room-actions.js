@@ -14,12 +14,24 @@ export class RoomActions {
   }
 
   async perform(action, fields = {}) {
+    return this.#performOperation(() => this.#service.action(action, fields));
+  }
+
+  async loadPlayerProfile() {
+    return this.#performOperation(() => this.#service.loadPlayerProfile());
+  }
+
+  async updatePlayerDisplayName(name) {
+    return this.#performOperation(() => this.#service.updatePlayerDisplayName(name));
+  }
+
+  async #performOperation(operation) {
     if (this.#performing) return;
     this.#performing = true;
     this.#actionVersion++;
     this.#syncFailed = false;
     try {
-      return await this.#service.action(action, fields);
+      return await operation();
     } finally {
       this.#performing = false;
     }

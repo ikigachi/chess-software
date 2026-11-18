@@ -639,10 +639,10 @@ h1 {
 .icon-button:hover {
   background:#e9dfcc
 }
-.room-form {
+.room-form,.profile-form {
   padding:24px 22px 13px
 }
-.room-form label {
+.room-form label,.profile-form label {
   display:block;
   font:9px var(--sans);
   letter-spacing:1px;
@@ -650,7 +650,7 @@ h1 {
   color:#8b785b;
   margin-bottom:9px
 }
-.room-form input {
+.room-form input,.profile-form input {
   display:block;
   width:100%;
   padding:12px 11px;
@@ -661,8 +661,21 @@ h1 {
   color:var(--ink);
   margin-bottom:14px
 }
-.room-form input::placeholder {
+.room-form input::placeholder,.profile-form input::placeholder {
   color:#b3a58e
+}
+.profile-form {
+  border-bottom:1px solid var(--line);
+  padding-bottom:22px
+}
+.profile-form p {
+  font-size:11px;
+  line-height:1.7;
+  color:var(--muted);
+  overflow-wrap:anywhere
+}
+.profile-form p.error {
+  color:#865c43
 }
 .room-form input[name=code] {
   text-transform:uppercase;
@@ -1117,7 +1130,7 @@ h1 {
   .panel-title {
     padding:22px
   }
-  .room-panel .room-form {
+  .room-panel .room-form,.room-panel .profile-form {
     max-width:450px;
     margin:auto
   }

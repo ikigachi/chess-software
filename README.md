@@ -15,6 +15,7 @@ Build a chess application where two users connect through a shared room code, pl
 | SLF4J Simple | 2.0.20, server logging |
 | SQLite JDBC | 3.54.1.0, room and player storage |
 | JUnit Jupiter | 5.11.4, automated tests only |
+| Node.js | 24, optional frontend tests only; no frontend server or npm packages required |
 
 From the repository root:
 
@@ -164,7 +165,9 @@ If the player service is unavailable, opening a new game-service session returns
 
 `GET /api/profile` loads the current player profile and refreshes its cached session name. `PUT /api/profile` accepts JSON with `name` and `token` and updates that profile. Both routes require an active game-service session, initialized by `GET /api/state`, and return `{ "profile": { "id": "...", "name": "..." }, "token": "..." }`. The server obtains the player credential from its session; supplied `id` or `credential` fields do not choose the target player. The browser never needs to read its HttpOnly cookie.
 
-An absent or expired profile session returns `401` without issuing a new cookie. Invalid update tokens return `403`; invalid JSON or names return `400`; unsupported content types return `415`; oversized bodies return `413`; and unavailable or invalid player-service responses return `503`. Successful updates change the cached viewer name while preserving the session identity, token, room, board and recorded participants. After a failed acknowledgement, `GET /api/profile` can reload the actual saved name before a retry. Profile editing in the interface is the next step.
+An absent or expired profile session returns `401` without issuing a new cookie. Invalid update tokens return `403`; invalid JSON or names return `400`; unsupported content types return `415`; oversized bodies return `413`; and unavailable or invalid player-service responses return `503`. Successful updates change the cached viewer name while preserving the session identity, token, room, board and recorded participants. After a failed acknowledgement, `GET /api/profile` can reload the actual saved name before a retry.
+
+In the Room tab, use **Saved profile name** and **Save profile name** to persist your public name. **Name for this room** is a separate encounter name: creating or joining a room does not save the profile. The saved name prefills the encounter field until the user edits it, and existing games retain their recorded participant names. The frontend queries the saved profile after a failed update without automatically repeating the write. If that query also fails, saving remains disabled until **Load saved name** succeeds. Room synchronization continues independently of the player service.
 
 `POST /games` creates a game from a JSON object containing `name` and the `token` obtained from `GET /api/state`. Send both requests with the same browser cookie. A successful response has status `201`, includes the game `id`, `room` and `pieces`, and provides its URL in the `Location` header. Invalid JSON or names return `400`, invalid tokens return `403`, oversized bodies return `413` and unsupported content types return `415`.
 
@@ -224,6 +227,14 @@ mvn test
 The latest run passed 124 tests. Room and player repository contract tests run against SQLite and in-memory storage. Storage tests cover rejected writes, invalid stored data and recovery. Room tests also check move numbering and foreign-key enforcement on each room connection. HTTP integration tests run the web server, game service and player service separately, exercising Javalin routing, JSON game creation and moves, forwarded cookies, concurrent joining, game queries and actions. Player checks cover compatible identities, invalid service responses, session-protected profile updates, expired sessions, attempts to target another player, recovery after an invalid acknowledgement, persisted names after a service restart and a player-service outage while existing players continue. A SQLite integration check confirms that a new session loads the updated profile without changing participants or moves in the stored game. Move checks cover rejected requests, promotion and recovery after restarting SQLite storage. An unavailable game service produces `503` while the page remains accessible. To reproduce the restart check, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
+
+Run the six frontend interaction and HTTP adapter tests with Node.js 24:
+
+```bash
+node --test chess-frontend/src/test/javascript/player-profile.test.mjs
+```
+
+These tests cover profile responses without board data, explicit profile writes, separate encounter names, lost acknowledgements, rejected names and stale background responses. Browser checks also cover saving and reloading a profile, preserving an edited encounter name and historical participants, rejecting a blank name, recovering after a player-service restart and the mobile layout.
 
 To verify the frontend service boundary, open Regalia and run this in the browser console. The test service should log `null` and `DEMO01` and send no API requests for these calls.
 
