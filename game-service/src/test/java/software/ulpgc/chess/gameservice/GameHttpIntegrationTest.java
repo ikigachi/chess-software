@@ -1,4 +1,4 @@
-package software.ulpgc.chess.backend;
+package software.ulpgc.chess.gameservice;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -8,7 +8,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import software.ulpgc.chess.application.domain.model.*;
-import software.ulpgc.chess.backend.infrastructure.adapters.*;
 import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
 import software.ulpgc.chess.gameservice.application.usecases.*;
 import software.ulpgc.chess.gameservice.infrastructure.adapters.*;
@@ -38,12 +37,10 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-class RoomHttpIntegrationTest {
-    private RoomHttpServer server;
-    private GameHttpServer gameServer;
+class GameHttpIntegrationTest {
+    private GameHttpServer server;
     private PlayerHttpServer playerServer;
     private HttpPlayerService playerIdentity;
-    private GameServiceProxy proxy;
     private GetRoomUseCase rooms;
     private final HttpClient white = browser();
     private final HttpClient black = browser();
@@ -65,12 +62,9 @@ class RoomHttpIntegrationTest {
         RoomApiHandler api = new RoomApiHandler(new CreateRoomUseCase(repository), rooms,
                 new EnterRoomUseCase(rooms, new JoinRoomUseCase(repository)),
                 new MoveUseCase(repository), sessions, new RoomJsonCodec());
-        gameServer = new GameHttpServer(0, api,
+        server = new GameHttpServer(0, api,
                 new GameApiHandler(new CreateRoomUseCase(repository), rooms, new MoveUseCase(repository), sessions, new RoomJsonCodec()),
                 new PlayerProfileApiHandler(new PlayerProfileUseCases(playerIdentity, playerIdentity), sessions, new RoomJsonCodec()));
-        gameServer.start();
-        proxy = new GameServiceProxy(gameServer.uri());
-        server = new RoomHttpServer(0, proxy, new StaticAssetHandler());
         server.start();
     }
 
@@ -85,8 +79,6 @@ class RoomHttpIntegrationTest {
 
     @AfterEach void stop() {
         if (server != null) server.close();
-        if (proxy != null) proxy.close();
-        if (gameServer != null) gameServer.close();
         if (playerIdentity != null) playerIdentity.close();
         if (playerServer != null) playerServer.close();
     }
@@ -316,55 +308,14 @@ class RoomHttpIntegrationTest {
         }
     }
 
-    @Test void servesStaticMarkupJavascriptAndAllPieceAssets() throws Exception {
-        var response = get(white, "/");
+    @Test void servesAnInitialBoardWithoutJoiningARoom() throws Exception {
+        var response = get(white, "/api/state");
         assertEquals(200, response.statusCode());
-        assertTrue(response.body().contains("A game, without haste."));
-        assertTrue(response.body().contains("<script type=\"module\" src=\"/main.js\""));
-        assertTrue(response.body().contains("id=\"square-template\""));
-        assertFalse(response.body().contains("{{"));
-        var preview = data(get(white, "/api/state"));
+        var preview = data(response);
         assertTrue(preview.get("room").isJsonNull());
         assertEquals(32, preview.getAsJsonObject("pieces").size());
         assertEquals("Guest", preview.getAsJsonObject("viewer").get("name").getAsString());
-        assertEquals(200, get(white, "/style.css").statusCode());
-        var mainScript = get(white, "/main.js");
-        assertEquals(200, mainScript.statusCode());
-        assertTrue(mainScript.headers().firstValue("Content-Type").orElseThrow().startsWith("text/javascript"));
-        assertEquals(200, get(white, "/app.js").statusCode());
-        var roomActions = get(white, "/room-actions.js");
-        assertEquals(200, roomActions.statusCode());
-        assertTrue(roomActions.headers().firstValue("Content-Type").orElseThrow().startsWith("text/javascript"));
-        assertEquals(200, get(white, "/room-api.js").statusCode());
-        assertTrue(get(white, "/app.js").headers().firstValue("Content-Type").orElseThrow().startsWith("text/javascript"));
-        for (String color : new String[]{"white", "black"}) {
-            for (String piece : new String[]{"pawn", "rook", "knight", "bishop", "queen", "king"}) {
-                var asset = get(white, "/assets/pieces/" + color + "-" + piece + ".svg");
-                assertEquals(200, asset.statusCode());
-                assertEquals("image/svg+xml", asset.headers().firstValue("Content-Type").orElseThrow());
-            }
-        }
-        assertEquals(200, get(white, "/assets/marble-bust.png").statusCode());
-        assertEquals(404, get(white, "/assets/pieces/white-dragon.svg").statusCode());
-        assertEquals(404, get(white, "/unknown").statusCode());
-        assertEquals(405, get(white, "/api/action").statusCode());
     }
-
-    @Test void gameServiceCanRunIndependentlyAndItsFailureIsReportedByTheWebServer() throws Exception {
-        var direct = white.send(HttpRequest.newBuilder(gameServer.uri().resolve("/api/state")).GET().build(),
-                HttpResponse.BodyHandlers.ofString());
-        assertEquals(200, direct.statusCode());
-        assertEquals(32, data(direct).getAsJsonObject("pieces").size());
-        var service = gameServer;
-        gameServer = null;
-        service.close();
-
-        var unavailable = get(white, "/api/state");
-        assertEquals(503, unavailable.statusCode());
-        assertEquals("Game service is unavailable. Try again shortly.", data(unavailable).get("message").getAsString());
-        assertEquals(200, get(white, "/").statusCode());
-    }
-
     @Test void aPlayerServiceOutageRejectsNewSessionsButPreservesExistingPlayersAndGames() throws Exception {
         String whiteToken = token(white);
         String blackToken = token(black);
@@ -464,7 +415,7 @@ class RoomHttpIntegrationTest {
         assertEquals(2, rooms.execute(code).game().moves().size());
     }
 
-    @Test void rejectsInvalidTokensAndKeepsUserTextOutOfTheHtmlDocument() throws Exception {
+    @Test void rejectsInvalidTokensAndPreservesPlayerText() throws Exception {
         String csrf = token(white);
         var invalid = post(white, Map.of("token", "wrong", "action", "create", "name", "Alice"));
         assertEquals(403, invalid.statusCode());
@@ -474,7 +425,6 @@ class RoomHttpIntegrationTest {
         var created = data(post(white, Map.of("token", csrf, "action", "create", "name", name)));
         assertEquals(name, created.getAsJsonObject("viewer").get("name").getAsString());
         assertEquals(name, created.getAsJsonObject("room").getAsJsonObject("white").get("name").getAsString());
-        assertFalse(get(white, "/").body().contains(name));
         var waiting = post(white, Map.of("token", csrf, "action", "move", "from", "e2", "to", "e4"));
         assertEquals(400, waiting.statusCode());
         assertEquals("Wait for the second player to join.", data(waiting).get("message").getAsString());
@@ -562,7 +512,7 @@ class RoomHttpIntegrationTest {
         assertEquals("GET, PUT", unsupported.headers().firstValue("Allow").orElseThrow());
     }
 
-    @Test void recordsJsonMovesThroughTheWebServerAndTheIndependentGameService() throws Exception {
+    @Test void recordsJsonMovesForBothBrowserSessions() throws Exception {
         String whiteToken = token(white);
         String blackToken = token(black);
         String code = data(createGame(white, whiteToken, "Alice")).get("id").getAsString();
@@ -582,7 +532,7 @@ class RoomHttpIntegrationTest {
         reply.addProperty("token", blackToken);
         reply.addProperty("from", "e7");
         reply.addProperty("to", "e5");
-        var direct = putGame(black, gameServer.uri().resolve("/games/" + code), reply.toString());
+        var direct = putGame(black, server.uri().resolve("/games/" + code), reply.toString());
         assertEquals(200, direct.statusCode());
         var played = data(direct);
         assertEquals("White", played.getAsJsonObject("room").get("turn").getAsString());
@@ -636,7 +586,7 @@ class RoomHttpIntegrationTest {
         var oversized = putGame(white, uri, "x".repeat(8193));
         assertEquals(413, oversized.statusCode());
         assertEquals("Request too large", data(oversized).get("message").getAsString());
-        var directOversized = putGame(white, gameServer.uri().resolve("/games/MISSING"), "x".repeat(8193));
+        var directOversized = putGame(white, server.uri().resolve("/games/MISSING"), "x".repeat(8193));
         assertEquals(413, directOversized.statusCode());
         assertEquals("Request too large", data(directOversized).get("message").getAsString());
     }
@@ -650,7 +600,7 @@ class RoomHttpIntegrationTest {
         var tokens = List.of(token(black), token(challenger));
         var pending = new ArrayList<CompletableFuture<HttpResponse<String>>>();
         for (int index = 0; index < clients.size(); index++) {
-            var request = HttpRequest.newBuilder(gameServer.uri().resolve("/api/action"))
+            var request = HttpRequest.newBuilder(server.uri().resolve("/api/action"))
                     .header("Content-Type", "application/x-www-form-urlencoded")
                     .POST(HttpRequest.BodyPublishers.ofString(FormData.encode(
                             Map.of("action", "join", "token", tokens.get(index), "name", "Opponent", "code", code))))
@@ -975,7 +925,6 @@ class RoomHttpIntegrationTest {
         assertEquals("Not found", data(missing).get("message").getAsString());
         assertTrue(data(missing).get("token").isJsonNull());
         assertEquals(404, get(white, "/rooms").statusCode());
-        assertEquals(404, get(white, "/assets/../pom.xml").statusCode());
         var wrongMethod = white.send(HttpRequest.newBuilder(server.uri().resolve("/api/state"))
                 .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
         assertEquals(405, wrongMethod.statusCode());

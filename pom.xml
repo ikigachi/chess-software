@@ -13,7 +13,6 @@
         <module>chess-core</module>
         <module>player-service</module>
         <module>game-service</module>
-        <module>chess-backend</module>
         <module>chess-frontend</module>
     </modules>
 

@@ -12,7 +12,5 @@
 !game-service/pom.xml
 !game-service/src/
 !game-service/src/**
-!chess-backend/
-!chess-backend/pom.xml
 !chess-frontend/
 !chess-frontend/pom.xml

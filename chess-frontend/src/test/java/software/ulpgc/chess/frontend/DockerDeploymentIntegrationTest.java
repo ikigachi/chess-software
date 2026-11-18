@@ -1,4 +1,4 @@
-package software.ulpgc.chess.backend;
+package software.ulpgc.chess.frontend;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -7,12 +7,12 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
-import software.ulpgc.chess.gameservice.infrastructure.http.FormData;
 
 import java.net.CookieManager;
 import java.net.CookiePolicy;
 import java.net.ServerSocket;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.StringJoiner;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -40,7 +41,7 @@ class DockerDeploymentIntegrationTest {
 
     @BeforeAll void startIsolatedDeployment() throws Exception {
         repositoryRoot = findRepositoryRoot();
-        logDirectory = Files.createTempDirectory(repositoryRoot.resolve("chess-backend/target"), "docker-check-");
+        logDirectory = Files.createTempDirectory(repositoryRoot.resolve("chess-frontend/target"), "docker-check-");
         try (var socket = new ServerSocket(0)) {
             origin = URI.create("http://127.0.0.1:" + socket.getLocalPort());
         }
@@ -55,6 +56,45 @@ class DockerDeploymentIntegrationTest {
             runCompose("logs", "--no-color");
         } finally {
             runCompose("down", "--volumes");
+        }
+    }
+
+    @Test void servesStaticMarkupJavascriptAndAllPieceAssetsWithoutEmbeddingPlayerText() throws Exception {
+        try (var browser = newBrowser()) {
+            var response = send(browser, "/", "GET", null);
+            assertEquals(200, response.statusCode());
+            assertTrue(response.body().contains("A game, without haste."));
+            assertTrue(response.body().contains("<script type=\"module\" src=\"/main.js\""));
+            assertTrue(response.body().contains("id=\"square-template\""));
+            assertFalse(response.body().contains("{{"));
+            var preview = loadState(browser);
+            assertTrue(preview.get("room").isJsonNull());
+            assertEquals(32, preview.getAsJsonObject("pieces").size());
+            assertEquals("Guest", preview.getAsJsonObject("viewer").get("name").getAsString());
+            assertEquals(200, send(browser, "/style.css", "GET", null).statusCode());
+            for (String script : List.of("main.js", "app.js", "room-actions.js", "room-api.js")) {
+                var javascript = send(browser, "/" + script, "GET", null);
+                assertEquals(200, javascript.statusCode());
+                assertEquals("application/javascript", javascript.headers().firstValue("Content-Type")
+                        .orElseThrow().split(";", 2)[0]);
+            }
+            for (String color : List.of("white", "black")) {
+                for (String piece : List.of("pawn", "rook", "knight", "bishop", "queen", "king")) {
+                    var asset = send(browser, "/assets/pieces/" + color + "-" + piece + ".svg", "GET", null);
+                    assertEquals(200, asset.statusCode());
+                    assertEquals("image/svg+xml", asset.headers().firstValue("Content-Type").orElseThrow().split(";", 2)[0]);
+                }
+            }
+            assertEquals(200, send(browser, "/assets/marble-bust.png", "GET", null).statusCode());
+            for (String missing : List.of("/assets/pieces/white-dragon.svg", "/unknown", "/assets/../pom.xml")) {
+                assertEquals(404, send(browser, missing, "GET", null).statusCode());
+            }
+            readJsonResponse(send(browser, "/api/action", "GET", null), 405);
+            String name = "A <script>& {{TOKEN}}";
+            var created = readJsonResponse(sendJson(browser, "/games", "POST",
+                    Map.of("token", preview.get("token").getAsString(), "name", name)), 201);
+            assertEquals(name, created.getAsJsonObject("room").getAsJsonObject("white").get("name").getAsString());
+            assertFalse(send(browser, "/", "GET", null).body().contains(name));
         }
     }
 
@@ -136,7 +176,7 @@ class DockerDeploymentIntegrationTest {
             runCompose("stop", "game-service");
             try {
                 var failure = readJsonResponse(send(browser, "/api/state", "GET", null), 503);
-                assertTrue(failure.get("message").getAsString().contains("unavailable"));
+                assertEquals("Game service is unavailable. Try again shortly.", failure.get("message").getAsString());
                 assertEquals(200, send(browser, "/", "GET", null).statusCode());
             } finally {
                 runCompose("start", "game-service");
@@ -159,7 +199,8 @@ class DockerDeploymentIntegrationTest {
     }
 
     private void runCompose(String... arguments) throws Exception {
-        List<String> command = new ArrayList<>(List.of("docker", "compose", "-p", projectName));
+        List<String> command = new ArrayList<>(List.of("docker", "compose", "-f",
+                repositoryRoot.resolve("compose.yaml").toString(), "-p", projectName));
         command.addAll(List.of(arguments));
         Path output = logDirectory.resolve("command-" + ++commandNumber + ".log");
         var builder = new ProcessBuilder(command).directory(repositoryRoot.toFile())
@@ -224,9 +265,16 @@ class DockerDeploymentIntegrationTest {
     private JsonObject joinRoom(HttpClient browser, String code, String token, String name) throws Exception {
         var request = HttpRequest.newBuilder(origin.resolve("/api/action")).timeout(Duration.ofSeconds(15))
                 .header("Content-Type", "application/x-www-form-urlencoded")
-                .POST(HttpRequest.BodyPublishers.ofString(FormData.encode(Map.of("action", "join", "code", code,
+                .POST(HttpRequest.BodyPublishers.ofString(encodeForm(Map.of("action", "join", "code", code,
                         "token", token, "name", name)), StandardCharsets.UTF_8)).build();
         return readJsonResponse(browser.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)), 200);
+    }
+
+    private String encodeForm(Map<String, String> fields) {
+        StringJoiner form = new StringJoiner("&");
+        fields.forEach((name, value) -> form.add(URLEncoder.encode(name, StandardCharsets.UTF_8)
+                + "=" + URLEncoder.encode(value, StandardCharsets.UTF_8)));
+        return form.toString();
     }
 
     private JsonObject recordMove(HttpClient browser, String code, String token, String from, String to) throws Exception {

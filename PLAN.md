@@ -8,14 +8,13 @@ Este documento se escribe en español por petición expresa del usuario. El cód
 
 ## 1. Punto de partida comprobado
 
-El commit previo a este cambio es `f622d3a`, ya subido a GitHub con la edición del perfil desde la interfaz del paso 2.2. Este cambio completa los pasos 3.1 y 3.2: Compose construye y arranca NGINX y los dos servicios Java, con volúmenes independientes. Pasan 127 pruebas Java, incluidas tres del despliegue Docker, y seis pruebas JavaScript. El usuario también ha confirmado el recorrido manual con dos navegadores, perfiles, turnos, movimientos rechazados, nombres históricos, reinicios y recuperación tras detener el servicio. La verificación reproducible de contenedores utiliza Java, HttpClient, JUnit y Maven; no necesita Python.
+El commit previo a este cambio es `d4d201e`, ya subido a GitHub con el despliegue Docker y su verificación. Este cambio completa el paso 3.3: traslada las pruebas y retira el módulo `chess-backend`. Una compilación limpia mantiene 127 pruebas Java, ahora 123 sin Docker y cuatro del despliegue; las comprobaciones de API están en `game-service` y las de frontend y NGINX en `chess-frontend`. El recorrido manual del usuario ya había confirmado perfiles, salas, turnos, movimientos rechazados, nombres históricos y recuperación tras reinicios y caídas. Las pruebas reproducibles utilizan Java, HttpClient, JUnit y Maven, sin Python.
 
 | Elemento | Situación actual |
 | --- | --- |
 | `chess-core` | Modelo compartido y reglas del ajedrez, sin HTTP, JSON ni JDBC |
 | `game-service` | Salas, sesiones, movimientos y persistencia de salas y partidas en SQLite; puerto 8081 |
 | `player-service` | Identidades estables y operaciones sobre nombres de perfil; perfiles persistentes en SQLite; puerto 8082 |
-| `chess-backend` | Sirve el frontend y reenvía peticiones al servicio de partidas; puerto 8080 |
 | Docker Compose | NGINX sirve el frontend y reenvía `/api` y `/games` a `game-service`; `player-service` resuelve perfiles en otro contenedor; un volumen propio por servicio Java y solo el puerto web publicado |
 | `chess-frontend` | HTML, CSS, JavaScript y piezas SVG; no necesita un proceso Node.js |
 | Comunicación | Servidores Java con Javalin; JSON para crear y mover partidas; formularios todavía para unirse, refrescar y dejar de ver una sala |
@@ -118,7 +117,7 @@ Si un cambio remoto se confirma pero se pierde su respuesta, consultar el perfil
 
 ### Fase 3. Introducir NGINX
 
-**Estado:** pasos 3.1 y 3.2 completados y verificados en este cambio. Compose arranca NGINX y los dos servicios Java; Maven compila dentro de Docker y cada servicio conserva su SQLite en un volumen propio. NGINX es software configurado en un contenedor, sin módulo Java adicional. Las tres pruebas Java de Docker comprueban sesiones, creación y unión a sala, movimientos, perfiles, cabeceras, errores, límite de cuerpo y un servicio sin respuesta. Tras recrear ambos contenedores Java recuperan la identidad y la partida y registran otro movimiento. El recorrido manual del usuario también ha confirmado esos flujos principales y la recuperación tras una caída. La escucha en contenedor usa `0.0.0.0` sin publicar los puertos Java; el arranque directo conserva `127.0.0.1`. El paso 3.3 mantiene pendiente trasladar las pruebas existentes y retirar `chess-backend`.
+**Estado:** pasos 3.1 y 3.2 guardados en `d4d201e`. Paso 3.3 completado y verificado en este cambio. Se ha retirado `chess-backend` del reactor Maven y del contexto Docker. Sus 32 comprobaciones de API y estado inicial se ejecutan directamente en `game-service`; las comprobaciones de recursos, aislamiento del texto del jugador y fallo del gateway se conservan en las cuatro pruebas Docker de `chess-frontend`. La compilación limpia pasa 127 pruebas Java. Compose sigue arrancando NGINX y los dos servicios Java con sus volúmenes independientes.
 
 **Objetivo:** utilizar NGINX como entrada HTTP, sirviendo los archivos web y reenviando las llamadas al servicio adecuado.
 
@@ -136,7 +135,7 @@ Inicialmente, `/games` y las operaciones públicas de `/api/` seguirán llegando
 
 Conservar las cabeceras relevantes y los mensajes de error de la aplicación. Una caída del upstream debe producir una respuesta comprensible para `RoomApi`, no una página HTML que el navegador intente interpretar como JSON. Las reglas del ajedrez siguen en Java y los servidores Java siguen usando Javalin.
 
-Antes de quitar el módulo Java, recolocar sus pruebas de API en los servicios correspondientes y conservar la verificación de frontend y proxy. No perder cobertura por eliminar el proyecto que alojaba las pruebas.
+La migración de pruebas y la retirada del gateway Java están realizadas en el paso 3.3 local. El frontend conserva su ejecución HTML, CSS y JavaScript; las dependencias Java añadidas a su POM son solo de pruebas. No se ha creado un módulo adicional para las comprobaciones del despliegue.
 
 **Cierre:** dos usuarios crean, se unen, juegan y reabren una partida entrando por NGINX. El arranque documentado ya no requiere el gateway Java y funciona desde una copia limpia.
 
@@ -283,7 +282,7 @@ El plan se actualizará si cambia el enunciado o una comprobación revela otra d
 
 ## 8. Siguiente acción concreta
 
-Este cambio cubre **el despliegue de NGINX y los servicios Java con Docker** y **su verificación automatizada con Java**, junto con el recorrido manual confirmado por el usuario. El siguiente paso es **el 3.3: trasladar las comprobaciones existentes de `chess-backend` y retirar el gateway Java** una vez conservada su cobertura. Consul y las réplicas quedan para un paso posterior con los contratos de estado y concurrencia preparados.
+Completado el paso 3.3, el siguiente paso del plan es **el 4.1: concretar los contratos de sala, partida, participante y actor autenticado**, antes de separar encuentros y partidas. Se mantienen la transacción actual de sala y movimientos y las identidades existentes. Consul y las réplicas quedan para un paso posterior con los contratos de estado y concurrencia preparados.
 
 La creación de este documento no implementa estas fases ni crea un commit.
 
