@@ -84,4 +84,13 @@ class DomainInvariantsTest {
         assertDoesNotThrow(() -> played.validateTurn(black));
         assertEquals(Color.White, ready.game().turn());
     }
+
+    @Test
+    void userNamesAreNormalizedAndBoundedInTheDomain() {
+        assertEquals(new User("white", "Zoë"), new User("white", " Zoë "));
+        assertEquals("x".repeat(40), new User("white", "x".repeat(40)).name());
+        for (String invalid : new String[]{null, "", " ", "x".repeat(41)}) {
+            assertThrows(IllegalArgumentException.class, () -> new User("white", invalid));
+        }
+    }
 }

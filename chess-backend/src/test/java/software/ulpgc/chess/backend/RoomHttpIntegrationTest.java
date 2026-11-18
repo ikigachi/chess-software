@@ -13,6 +13,8 @@ import software.ulpgc.chess.gameservice.application.usecases.*;
 import software.ulpgc.chess.gameservice.infrastructure.adapters.*;
 import software.ulpgc.chess.gameservice.infrastructure.http.*;
 import software.ulpgc.chess.playerservice.application.usecases.ResolvePlayerUseCase;
+import software.ulpgc.chess.playerservice.application.usecases.RenamePlayerUseCase;
+import software.ulpgc.chess.playerservice.infrastructure.adapters.InMemoryPlayerRepository;
 import software.ulpgc.chess.playerservice.infrastructure.adapters.PlayerApiHandler;
 import software.ulpgc.chess.playerservice.infrastructure.adapters.PlayerHttpServer;
 
@@ -50,7 +52,7 @@ class RoomHttpIntegrationTest {
     }
 
     private void start(RoomRepository repository, Clock clock) throws Exception {
-        playerServer = new PlayerHttpServer(0, new PlayerApiHandler(new ResolvePlayerUseCase()));
+        playerServer = playerServer(0);
         playerServer.start();
         playerIdentity = new HttpPlayerIdentity(playerServer.uri());
         BrowserSessions sessions = new BrowserSessions(playerIdentity, clock);
@@ -64,6 +66,12 @@ class RoomHttpIntegrationTest {
         proxy = new GameServiceProxy(gameServer.uri());
         server = new RoomHttpServer(0, proxy, new StaticAssetHandler());
         server.start();
+    }
+
+    private PlayerHttpServer playerServer(int port) {
+        var repository = new InMemoryPlayerRepository();
+        var resolve = new ResolvePlayerUseCase(repository);
+        return new PlayerHttpServer(port, new PlayerApiHandler(resolve, new RenamePlayerUseCase(resolve, repository)));
     }
 
     @AfterEach void stop() {
@@ -194,11 +202,51 @@ class RoomHttpIntegrationTest {
         assertEquals(200, putGame(black, code, Map.of("token", blackToken, "from", "e7", "to", "e5")).statusCode());
         assertEquals(2, rooms.execute(code).game().moves().size());
 
-        playerServer = new PlayerHttpServer(playerPort, new PlayerApiHandler(new ResolvePlayerUseCase()));
+        playerServer = playerServer(playerPort);
         playerServer.start();
 
         assertEquals(200, get(newcomer, "/api/state").statusCode());
         assertEquals(2, data(get(white, "/api/state")).getAsJsonObject("room").getAsJsonArray("moves").size());
+    }
+
+    @Test void profileRenamingSurvivesNewSessionsWithoutRewritingStoredParticipants(@TempDir Path directory) throws Exception {
+        stop();
+        AtomicLong elapsed = new AtomicLong();
+        InstantSource time = () -> Instant.ofEpochMilli(elapsed.get());
+        SqliteDatabase database = new SqliteDatabase(directory.resolve("rooms.sqlite"));
+        database.initialize();
+        start(new SqliteRoomRepository(database), time.withZone(ZoneOffset.UTC));
+        String whiteToken = token(white);
+        String code = data(createGame(white, whiteToken, "Alice")).get("id").getAsString();
+        assertEquals(200, post(black, Map.of("token", token(black), "action", "join", "name", "Bob", "code", code)).statusCode());
+        assertEquals(200, putGame(white, code, Map.of("token", whiteToken, "from", "e2", "to", "e4")).statusCode());
+        var before = data(get(white, "/games/" + code));
+        User original = rooms.execute(code).white();
+        var cookies = assertInstanceOf(CookieManager.class, white.cookieHandler().orElseThrow()).getCookieStore().getCookies();
+        String credential = cookies.stream().filter(cookie -> cookie.getName().equals("regalia"))
+                .findFirst().orElseThrow().getValue();
+        JsonObject request = new JsonObject();
+        request.addProperty("credential", credential);
+        request.addProperty("name", "Renamed");
+
+        var response = white.send(HttpRequest.newBuilder(playerServer.uri().resolve("/players/name"))
+                .header("Content-Type", "application/json").PUT(HttpRequest.BodyPublishers.ofString(request.toString())).build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode());
+        assertEquals(new User(original.id(), "Renamed"), playerIdentity.resolve(credential));
+        assertEquals(before, data(get(white, "/games/" + code)));
+        elapsed.set(8 * 60 * 60 * 1000L + 1);
+        var reopened = data(get(white, "/api/state"));
+        assertEquals(original.id(), reopened.getAsJsonObject("viewer").get("id").getAsString());
+        assertEquals("Renamed", reopened.getAsJsonObject("viewer").get("name").getAsString());
+        assertTrue(reopened.get("room").isJsonNull());
+        String newToken = reopened.get("token").getAsString();
+        assertEquals(200, post(white, Map.of("token", newToken, "action", "join", "name", "Renamed", "code", code)).statusCode());
+        Room stored = new SqliteRoomRepository(database).findByCode(code).orElseThrow();
+        assertEquals(original, stored.white());
+        assertEquals(1, stored.game().moves().size());
+        assertEquals(before, data(get(white, "/games/" + code)));
     }
 
     @Test void twoBrowserSessionsCreateJoinMoveAndRefresh() throws Exception {

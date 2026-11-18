@@ -3,6 +3,7 @@ package software.ulpgc.chess.gameservice.infrastructure.http;
 import software.ulpgc.chess.application.domain.model.Move;
 import software.ulpgc.chess.application.domain.model.Promotion;
 import software.ulpgc.chess.application.domain.model.Square;
+import software.ulpgc.chess.application.domain.model.User;
 
 import java.util.Locale;
 import java.util.Map;
@@ -12,7 +13,7 @@ public record RoomActionRequest(String action, String name, String code, Move mo
     public RoomActionRequest {
         if (action == null || !Set.of("create", "join", "move", "refresh", "leave").contains(action))
             throw new IllegalArgumentException("Unknown action.");
-        if (action.equals("create") || action.equals("join")) name = normalizeName(name);
+        if (action.equals("create") || action.equals("join")) name = User.normalizeName(name);
         if (action.equals("join")) code = normalizeCode(code);
         if (action.equals("move") && move == null)
             throw new IllegalArgumentException("Move cannot be null");
@@ -38,12 +39,6 @@ public record RoomActionRequest(String action, String name, String code, Move mo
             case "knight" -> Promotion.Knight;
             default -> throw new IllegalArgumentException("Choose a queen, rook, bishop, or knight for promotion.");
         };
-    }
-
-    private static String normalizeName(String name) {
-        if (name == null || name.isBlank() || name.strip().length() > 40)
-            throw new IllegalArgumentException("Enter a name between 1 and 40 characters.");
-        return name.strip();
     }
 
     private static String normalizeCode(String code) {

@@ -50,6 +50,7 @@ For different ports, start the player service with `8092`, the game service with
 │   └── src/
 │       ├── main/java/software/ulpgc/chess/playerservice/
 │       │   ├── Main.java
+│       │   ├── application/ports/
 │       │   ├── application/usecases/
 │       │   └── infrastructure/adapters/
 │       └── test/java/software/ulpgc/chess/playerservice/
@@ -84,7 +85,7 @@ For different ports, start the player service with `8092`, the game service with
 └── docs/screenshots/
 ```
 
-`chess-core` defines the chess rules and data model and supports loading board positions from FEN. `player-service` resolves stable guest-player identities. `game-service` executes room and game operations, manages sessions and stores matches. `chess-backend` serves the page and forwards HTTP requests. `chess-frontend` displays the board, players and move history and lets users interact with the game.
+`chess-core` defines the chess rules and data model and supports loading board positions from FEN. `player-service` resolves stable guest-player identities and manages public names in memory. `game-service` executes room and game operations, manages sessions and stores matches. `chess-backend` serves the page and forwards HTTP requests. `chess-frontend` displays the board, players and move history and lets users interact with the game.
 
 ## System architecture
 
@@ -98,11 +99,11 @@ flowchart LR
 
 The browser uses the web server as its origin. The web server, game service and player service run in separate Java processes using Javalin. When opening a session, the game service obtains its guest-player identity through the `PlayerIdentity` port and its HTTP adapter. The game service persists rooms in SQLite and manages active browser sessions in memory. Browser cookies let the original players reopen a saved room with its code after restarting the services.
 
-Player identity resolution has been extracted. Display names, room coordination and browser sessions remain in `game-service` during this step. Matches, registration and authentication services, together with NGINX routing, are pending.
+Player identity resolution and profile-name operations have been extracted. Names supplied when entering a room, room coordination and browser sessions remain in `game-service` during this step. Matches, registration and authentication services, together with NGINX routing, are pending.
 
 ### Planned service boundaries
 
-This is the target for the next extractions. The current executable system uses the three processes described above; player-service display-name management is still pending.
+This is the target for the next extractions. The current executable system uses the three processes described above. Persisting player profiles and connecting profile-name changes to the frontend are pending.
 
 | Component | Responsibility and data ownership |
 | --- | --- |
@@ -130,7 +131,8 @@ Services communicate through HTTP and JSON using application ports and infrastru
 | Incoming HTTP adapters | `infrastructure/adapters/RoomApiHandler` and `GameApiHandler`, registered by `GameHttpServer` |
 | Transport support | `infrastructure/http`: `RoomActionRequest`, `RoomJsonCodec`, `ApiMessages`, `FormData`, `HttpResponses` |
 | Sessions | `infrastructure/adapters/BrowserSessions` |
-| Player service | `player-service/application/usecases/ResolvePlayerUseCase`, exposed by `infrastructure/adapters/PlayerApiHandler` and `PlayerHttpServer` |
+| Player service | `player-service/application/usecases/ResolvePlayerUseCase` and `RenamePlayerUseCase`, exposed by `infrastructure/adapters/PlayerApiHandler` and `PlayerHttpServer` |
+| Player storage | `player-service/application/ports/PlayerRepository`, implemented by `infrastructure/adapters/InMemoryPlayerRepository` |
 | Web entry point | `chess-backend` uses `GameServiceProxy` for HTTP forwarding and `StaticAssetHandler` for frontend resources |
 
 Game-service package paths are relative to `software/ulpgc/chess/gameservice`. Its `Main` connects the collaborators through constructors. Storage-facing use cases depend on `RoomRepository`, while `EnterRoomUseCase` composes lookup and joining. Domain rules do not depend on HTTP, JSON or storage implementations.
@@ -151,7 +153,9 @@ Game-service package paths are relative to `software/ulpgc/chess/gameservice`. I
 
 ## Communication contract
 
-The game service calls `POST /players/resolve` on the player-service origin with a JSON `credential` containing the browser's canonical UUID cookie value. The response contains `id` and `name`, currently `Guest`. The identifier preserves the previous SHA-256 mapping, so existing players keep their seats after the extraction. The player service stores no credentials or profiles in this step. Invalid credentials or JSON return `400`; unsupported methods, content types and oversized bodies return `405`, `415` and `413`. This is guest identity resolution; account authentication is pending.
+The game service calls `POST /players/resolve` on the player-service origin with a JSON `credential` containing the browser's canonical UUID cookie value. The response contains `id` and the saved profile `name`, or `Guest` for an unnamed player. The identifier preserves the previous SHA-256 mapping, so existing players keep their seats after the extraction. Invalid credentials or JSON return `400`; unsupported methods, content types and oversized bodies return `405`, `415` and `413`. This is guest identity resolution; account authentication is pending.
+
+`PUT /players/name` on the player-service origin accepts JSON with `credential` and `name`, and returns the same identifier with the updated name. Names are trimmed and must contain between 1 and 40 characters. Invalid requests leave the previous name unchanged. This is an independent profile operation: creating or joining a room does not rename the profile. A new game-service session loads the saved profile name; existing sessions retain their current name. Names recorded in earlier rooms and games remain unchanged. Profiles are currently stored in memory and reset to `Guest` when the player service restarts, while identifiers and SQLite game records remain stable.
 
 If the player service is unavailable, opening a new game-service session returns `503` without issuing a cookie or changing a game. Existing sessions can continue playing. The browser continues to communicate with the web server.
 
@@ -208,7 +212,7 @@ Run all automated checks from the repository root:
 mvn test
 ```
 
-The latest run passed 103 tests. The same repository contract tests run against SQLite and in-memory storage. Storage tests also check rejected writes, invalid move numbering and foreign-key enforcement on every connection. HTTP integration tests run the web server, game service and player service separately, exercising Javalin routing, JSON game creation and moves, forwarded cookies, concurrent joining, game queries and actions. Player checks cover compatible identities, invalid service responses and a player-service outage while existing players continue. Move checks cover rejected requests, promotion and recovery after restarting SQLite storage. An unavailable game service produces `503` while the page remains accessible. To reproduce the restart check, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
+The latest run passed 110 tests. The same repository contract tests run against SQLite and in-memory storage. Storage tests also check rejected writes, invalid move numbering and foreign-key enforcement on every connection. HTTP integration tests run the web server, game service and player service separately, exercising Javalin routing, JSON game creation and moves, forwarded cookies, concurrent joining, game queries and actions. Player checks cover compatible identities, invalid service responses, name changes, rejected updates, storage failures and a player-service outage while existing players continue. A SQLite integration check confirms that a new session loads the updated profile without changing participants or moves in the stored game. Move checks cover rejected requests, promotion and recovery after restarting SQLite storage. An unavailable game service produces `503` while the page remains accessible. To reproduce the restart check, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 

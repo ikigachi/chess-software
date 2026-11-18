@@ -19,14 +19,15 @@ public final class PlayerHttpServer implements AutoCloseable {
             config.http.prefer405over404 = true;
             config.router.ignoreTrailingSlashes = false;
             config.routes.post("/players/resolve", players::resolve);
+            config.routes.put("/players/name", players::rename);
             config.routes.exception(JsonParseException.class, (exception, context) ->
                     players.error(context, 400, "Invalid JSON request."));
             config.routes.exception(IllegalArgumentException.class, (exception, context) ->
-                    players.error(context, 400, "Invalid player credential."));
+                    players.error(context, 400, exception.getMessage()));
             config.routes.exception(NotFoundResponse.class, (exception, context) ->
                     players.error(context, 404, "Not found"));
             config.routes.exception(MethodNotAllowedResponse.class, (exception, context) -> {
-                context.header("Allow", "POST");
+                context.header("Allow", context.path().equals("/players/name") ? "PUT" : "POST");
                 players.error(context, 405, "Method not allowed");
             });
             config.routes.exception(Exception.class, (exception, context) ->
