@@ -11,4 +11,9 @@ CREATE TABLE IF NOT EXISTS accounts (
     status TEXT NOT NULL CHECK (status IN ('Active', 'Inactive'))
 );
 
+CREATE TABLE IF NOT EXISTS account_passwords (
+    account_id TEXT PRIMARY KEY NOT NULL REFERENCES accounts(id),
+    password_hash TEXT NOT NULL CHECK (length(password_hash) > 0)
+);
+
 COMMIT;

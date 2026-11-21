@@ -35,6 +35,19 @@ public final class SqliteAccountDatabase {
     }
 
     public Connection openConnection() throws SQLException {
-        return DriverManager.getConnection(url);
+        Connection connection = DriverManager.getConnection(url);
+        try {
+            try (Statement statement = connection.createStatement()) {
+                statement.execute("PRAGMA foreign_keys = ON");
+            }
+            return connection;
+        } catch (SQLException exception) {
+            try {
+                connection.close();
+            } catch (SQLException closeFailure) {
+                exception.addSuppressed(closeFailure);
+            }
+            throw exception;
+        }
     }
 }

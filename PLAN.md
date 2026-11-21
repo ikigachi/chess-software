@@ -8,7 +8,7 @@ Este documento se escribe en español por petición expresa del usuario. El cód
 
 ## 1. Punto de partida comprobado
 
-El paso 4.2 está guardado en `630ad05`, con la separación interna de historial y sala. Este cambio completa el paso 5.1: `register-service` contiene el modelo `Account`, su asociación con el identificador estable del jugador, el puerto `AccountRepository`, el adaptador SQLite y `account-schema.sql`. El reactor tiene cinco módulos, pero continúan ejecutándose los dos servicios Java y NGINX. La verificación pasa 138 pruebas Java, incluidas nueve nuevas de cuentas y las cuatro de Docker, sin fallos ni omisiones en los resultados finales. Las rutas públicas, los datos de perfiles y las partidas conservan su funcionamiento actual.
+La referencia versionada es `877f733`, ya subida con el modelo y almacenamiento de cuentas del paso 5.1 y la ampliación pendiente de kata 5. Este cambio completa el paso 5.2: `register-service` ofrece altas y bajas por HTTP, resuelve al jugador desde su credencial de invitado y guarda cuenta y hash de contraseña en una transacción SQLite. El usuario ha autorizado Password4j y se utiliza Argon2id mediante un adaptador. La verificación pasa 155 pruebas Java, incluidas 26 del registro y las cuatro de Docker, sin fallos ni omisiones. Compose conserva NGINX y los dos servicios Java actuales; el registro se ejecuta de forma directa con su propio Main, todavía sin conexión con la interfaz.
 
 | Elemento | Situación actual |
 | --- | --- |
@@ -21,7 +21,7 @@ El paso 4.2 está guardado en `630ad05`, con la separación interna de historial
 | Comunicación | Servidores Java con Javalin; JSON para crear y mover partidas; formularios todavía para unirse, refrescar y dejar de ver una sala |
 | Perfiles | Consulta y guardado explícito desde la interfaz mediante la API protegida; nombre de perfil separado del registrado en cada encuentro |
 | Historial | Movimientos persistentes y consulta de partida por código; todavía no hay una pantalla de listado de encuentros anteriores |
-| `register-service` | Modelo de cuenta y almacenamiento SQLite preparados; todavía sin casos de uso, servidor HTTP ni contenedor |
+| `register-service` | Altas y bajas por HTTP en el puerto directo 8083; cuentas y hashes en `.regalia/accounts.sqlite`; todavía sin contenedor ni rutas públicas en NGINX |
 | Otros servicios | `matches-service` y autenticación todavía no están implementados |
 | ActiveMQ | No está incorporado ni se ha confirmado como requisito obligatorio |
 
@@ -172,7 +172,7 @@ El contrato debe establecer quién conserva los asientos, cómo conoce `game-ser
 
 ### Fase 5. Registro y autenticación
 
-**Estado:** paso 5.1 completado y verificado en este cambio. El nuevo módulo `register-service` contiene `Account`, `AccountStatus`, `AccountRepository`, `SqliteAccountDatabase` y `SqliteAccountRepository`. El esquema impone identificadores, nombres de acceso y asociaciones con jugadores únicos. Nueve pruebas comprueban las invariantes, la normalización, la baja como valor del dominio, los duplicados sin reemplazo, los datos persistidos, el reinicio y los fallos. Las cuatro pruebas Docker también pasan con el reactor de cinco módulos. Las altas y bajas por HTTP, el almacenamiento de contraseñas y las sesiones autenticadas siguen pendientes.
+**Estado:** paso 5.1 guardado y subido en `877f733`; paso 5.2 completado y verificado en este cambio. `AccountUseCases` coordina altas y bajas mediante los puertos `AccountRepository`, `PlayerIdentity` y `PasswordHasher`. Sus adaptadores encapsulan SQLite, HttpClient y Password4j; Javalin atiende las rutas privadas `POST /accounts` y `DELETE /accounts/current`. Las 26 pruebas del registro comprueban identidad, contraseñas, duplicados concurrentes, bajas, persistencia, migración aditiva y fallos. También pasan las cuatro pruebas Docker del despliegue actual. Las sesiones autenticadas, la invalidación del acceso y la conexión de la interfaz siguen pendientes de 5.3 y 5.4.
 
 **Objetivo:** diferenciar cuentas, perfiles y participantes históricos, permitiendo identificar al mismo usuario desde otro navegador.
 
@@ -183,19 +183,23 @@ El contrato debe establecer quién conserva los asientos, cómo conoce `game-ser
 | 5.3 | Implementar autenticación, cierre de sesión, caducidad y comprobación de cuenta activa | `Add account authentication and session lifecycle` |
 | 5.4 | Conectar la identidad verificada con las operaciones protegidas y añadir las pantallas necesarias | `Connect authenticated users to profiles and games` |
 
-El nombre de acceso se distingue del nombre público: admite entre 3 y 40 caracteres ASCII, con letras, dígitos, punto, guion y guion bajo; se eliminan espacios exteriores y se guarda en minúsculas. No se ha elegido el correo electrónico como identificador de acceso. Cada cuenta tiene su propio identificador y referencia un `User.id` existente mediante `playerId`, sin copiar su perfil ni cambiar los participantes de una sala. La propiedad de esa identidad deberá comprobarse desde el servidor al implementar el alta; el repositorio no autentica al dueño del identificador recibido.
+El nombre de acceso se distingue del nombre público: admite entre 3 y 40 caracteres ASCII, con letras, dígitos, punto, guion y guion bajo; se eliminan espacios exteriores y se guarda en minúsculas. No se ha elegido el correo electrónico como identificador de acceso. Cada cuenta recibe su propio identificador y referencia el `User.id` que `HttpPlayerIdentity` resuelve en el servicio de jugadores a partir de la credencial de invitado. Campos declarados como `id`, `playerId` o `status` no seleccionan el actor ni la asociación. El alta no copia el perfil ni cambia participantes históricos; el repositorio por sí solo no autentica al dueño de un identificador.
 
-El puerto permite insertar una cuenta y consultar por nombre de acceso o jugador. Insertar no actualiza ni reactiva una cuenta existente. Las cuentas inactivas conservan el nombre de acceso y la asociación, evitando que otro registro se los apropie. `Account.deactivate()` devuelve un valor inactivo que conserva la identidad; todavía no existe la operación de aplicación que guarde esa baja ni invalide sesiones. El adaptador recibe una ruta explícita; `.regalia/accounts.sqlite` es la ubicación prevista cuando exista el arranque del servicio. El esquema actual no incluye contraseñas, y las pruebas usan bases temporales.
+El puerto inserta la cuenta y su hash en una transacción, consulta cuentas y hashes y guarda la baja de una cuenta activa. Insertar no actualiza ni reactiva una cuenta existente, y la unicidad de SQLite protege también el caso concurrente. Las cuentas inactivas conservan el nombre de acceso, la asociación y el hash. Para dar de baja se resuelve al jugador y se comprueba la contraseña antes de guardar el estado inactivo; la invalidación de sesiones corresponde al siguiente paso. `registerservice.Main` usa `.regalia/accounts.sqlite` por defecto, permite cambiar ruta, puerto, origen de jugadores y dirección de escucha, y cierra el cliente y el servidor al terminar. Las pruebas usan bases temporales.
+
+`account-schema.sql` añade `account_passwords` sin eliminar ni reescribir las cuentas anteriores. La clave de cuenta es una referencia foránea y se activa su comprobación en cada conexión. Las cuentas heredadas sin hash se conservan sin inventar una contraseña: una futura habilitación de credenciales tendría que ser explícita. El fallo al insertar el hash revierte también el alta de la cuenta, y el fallo al guardar una baja conserva el estado anterior.
+
+El usuario autorizó el 21 de noviembre de 2026 elegir la biblioteca de contraseñas tras confirmar que no había estudiado una concreta. Se incorpora Password4j 1.8.4 detrás de `PasswordHasher`, con Argon2id versión 19, memoria de 19456 KiB, dos iteraciones, paralelismo uno, salida de 32 bytes y sal aleatoria de 16 bytes por hash. La contraseña admite entre 15 y 128 puntos de código Unicode y conserva espacios y mayúsculas. Se guarda la codificación del hash con su sal y parámetros; no se guarda ni devuelve la contraseña original. No es necesario volver a pedir autorización para esta biblioteca en los pasos siguientes.
 
 Registro y autenticación usarán la misma base de cuentas, conforme a lo indicado en clase. Esto no implica que todos los servicios puedan escribir las tablas de cuentas ni que deban compartir una conexión JDBC global. La creación del esquema y las escrituras de cada componente tendrán una responsabilidad definida.
 
-Los identificadores públicos y los nombres se conservan en `player-service`. Las contraseñas y la información privada de acceso no se introducen en `User`, en respuestas públicas ni en los registros históricos. Seleccionar una biblioteca adecuada para almacenar y verificar contraseñas; el SHA-256 actual deriva identificadores de invitados y no es una solución para almacenar contraseñas. No implementar criptografía propia. Referencia: [guía de almacenamiento de contraseñas de OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
+Los identificadores públicos y los nombres se conservan en `player-service`. Las contraseñas y la información privada de acceso no se introducen en `User`, en respuestas públicas ni en los registros históricos. El SHA-256 existente solo deriva identificadores de invitados; las contraseñas se procesan con la biblioteca autorizada, sin criptografía propia. Referencia: [guía de almacenamiento de contraseñas de OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
 
 Conservar el vínculo con las partidas del invitado al registrar su cuenta cuando se pueda demostrar que pertenece a la sesión actual. Una petición no podrá apropiarse de otro identificador. Cambiar de navegador después de iniciar sesión debe recuperar el mismo jugador, sin depender del UUID anónimo del navegador nuevo.
 
-La baja desactiva el acceso y las sesiones correspondientes, pero no borra las partidas ni sus participantes. La autenticación de cuentas es distinta de la presencia durante una partida: cerrar sesión, dejar de ver una sala y perder conexión son situaciones diferentes.
+La baja ya guarda el estado inactivo sin borrar partidas ni participantes. En 5.3 y 5.4 deberá revocar las sesiones autenticadas y bloquear sus operaciones protegidas; hoy no revoca las sesiones independientes de invitado que sigue utilizando el tablero. La autenticación de cuentas es distinta de la presencia durante una partida: cerrar sesión, dejar de ver una sala y perder conexión son situaciones diferentes.
 
-Antes de introducir bibliotecas o técnicas no autorizadas, explicar la elección y consultar al usuario. El paso 5.1 solo utiliza Java, JDBC, SQLite y JUnit ya autorizados; las bibliotecas de contraseñas y los pasos 5.2 a 5.4 siguen pendientes.
+La API actual de registro es interna: recibe la credencial de invitado como secreto de portador y solo se ejecuta directamente en loopback por defecto. NGINX no expone sus rutas y Compose todavía no incluye el servicio. Al conectarla al navegador en 5.4, el adaptador público debe obtener esa credencial desde la sesión del servidor y comprobar el token, como ya hace el perfil. No trasladar el campo `credential` al JavaScript del navegador ni presentarlo como una sesión de cuenta autenticada. Antes de introducir otras bibliotecas o técnicas no autorizadas, explicar la elección y consultar al usuario.
 
 **Cierre:** altas duplicadas y credenciales inválidas se rechazan; el cierre y la baja invalidan el acceso; otro navegador recupera la identidad correcta; el historial anterior permanece consultable según la política de acceso acordada.
 
@@ -298,6 +302,8 @@ Las pruebas se ejecutarán según el comportamiento afectado. No se escribirán 
 
 ## 7. Forma de trabajar
 
+Indicar siempre el nombre de commit propuesto junto a cada entrega de cambios, aunque todavía no se haya creado. La propuesta del nombre no autoriza a crear ni subir el commit.
+
 1. Elegir el siguiente paso de la fase activa y concretar su alcance.
 2. Mantener dominio, casos de uso, puertos y adaptadores separados, con creación de colaboradores en `Main`.
 3. Conservar el comportamiento existente y verificar los errores relevantes.
@@ -309,7 +315,7 @@ El plan se actualizará si cambia el enunciado o una comprobación revela otra d
 
 ## 8. Siguiente acción concreta
 
-Completado el paso 5.1, el siguiente trabajo es **el 5.2: implementar altas y bajas en register-service**, con casos de uso, puertos y adaptadores HTTP. Antes de guardar credenciales se debe explicar y acordar la biblioteca de contraseñas adecuada. El alta deberá resolver la identidad desde el servidor, mantener la asociación existente y guardar cuenta y credenciales de forma atómica. La autenticación, la invalidación de sesiones y la conexión de las pantallas correspondientes se completarán en los pasos 5.3 y 5.4; las operaciones internas distribuidas y la deduplicación siguen correspondiendo a fases posteriores. Consul, `/health`, upstreams y réplicas quedan desglosados en los pasos 3.4 a 3.7, con sus dependencias; la mejora pendiente de URL queda en el paso 6.4.
+Completado el paso 5.2, el siguiente trabajo es **el 5.3: autenticación, cierre de sesión, caducidad y comprobación de cuenta activa**, utilizando la base compartida de cuentas y Password4j ya autorizado. La invalidación tras la baja y la comprobación de cuentas activas deben preceder a la conexión del navegador del paso 5.4. Las pantallas, el adaptador público y el contenedor de registro se conectarán en 5.4. Consul, `/health`, upstreams y réplicas siguen desglosados en 3.4 a 3.7, con sus dependencias; la mejora pendiente de URL queda en 6.4.
 
 La creación de este documento no implementa estas fases ni crea un commit.
 
