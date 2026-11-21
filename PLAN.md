@@ -1,6 +1,6 @@
 # Plan de desarrollo de Regalia
 
-Fecha de revisión: 18 de noviembre de 2026.
+Fecha de revisión: 21 de noviembre de 2026.
 
 Este documento se escribe en español por petición expresa del usuario. El código, la interfaz y el README mantienen el inglés. Es una propuesta de trabajo: las fases pendientes no describen funcionalidades existentes ni autorizan automáticamente nuevas tecnologías o commits.
 
@@ -8,7 +8,7 @@ Este documento se escribe en español por petición expresa del usuario. El cód
 
 ## 1. Punto de partida comprobado
 
-La referencia versionada es `da1a31a`, ya subida a GitHub con la retirada de `chess-backend` y el traslado de sus pruebas. El paso 4.1 está completado localmente, sin commit: el README define los contratos de sala, partida, participante y actor, la propiedad futura de los datos y la migración. Una nueva prueba entre dos salas verifica los permisos por identidad y su independencia de la sala que se está viendo. La ejecución de este paso pasa 124 pruebas Java sin Docker; las cuatro pruebas Docker pasaron en el paso anterior. El runtime y las bases actuales no cambian.
+El paso 4.1 está guardado en `3f4ddfa`, con los contratos y su prueba de permisos entre dos salas. Este cambio completa el paso 4.2: `SqliteRoomRepository` coordina los datos de sala y la transacción, mientras `SqliteGameHistory` reconstruye la partida y guarda sus movimientos ordenados usando la misma conexión. Las lecturas de ambas partes también comparten una transacción. La verificación pasa 129 pruebas Java, incluidas las cuatro de Docker, sin fallos ni omisiones. Se conserva el esquema y se comprueba la continuación de datos existentes sin cambiar identificadores, fechas ni otras salas.
 
 | Elemento | Situación actual |
 | --- | --- |
@@ -141,16 +141,18 @@ La migración de pruebas y la retirada del gateway Java están realizadas en el 
 
 ### Fase 4. Preparar los límites antes de mover salas
 
-**Estado:** paso 4.1 definido y verificado localmente, pendiente de commit. El README distingue contratos actuales de requisitos de la extracción: identificadores, nombres históricos, pertenencia, sala vista, actor de sesión y futura cuenta autenticada. Especifica entradas y garantías de creación de partida, asignación de negras, consulta y movimiento entre servicios, ejemplos de éxito y rechazo y una migración que conserva datos e identificadores. La nueva prueba HTTP confirma que un token válido y un identificador declarado no permiten mover en otra sala, mientras un participante sí puede mover en una sala propia que no esté viendo. No se han añadido servicios, puertos sin uso ni cambios de esquema.
+**Estado:** paso 4.1 guardado y subido en `3f4ddfa`; paso 4.2 completado y verificado en este cambio. El README distingue contratos actuales de requisitos de la extracción: identificadores, nombres históricos, pertenencia, sala vista, actor de sesión y futura cuenta autenticada. La prueba HTTP confirma los permisos por identidad con independencia de la sala vista. El almacenamiento interno separa metadatos de sala e historial de partida en dos componentes cohesionados, con una única conexión y transacción para cada operación de repositorio. Una prueba sobre datos existentes comprueba identificadores de sala y partida distintos, fechas, participantes y aislamiento entre historiales. Siguen pasando las pruebas de promoción, historial inválido, recuperación y reversión de escrituras. No se han añadido procesos, puertos de aplicación ni cambios de esquema.
 
 **Objetivo:** definir la propiedad de los datos y la identidad que recibe cada operación, sin romper la transacción actual.
 
 | Paso | Trabajo | Posible commit |
 | --- | --- | --- |
 | 4.1 | Concretar contratos de sala, partida, participante y actor autenticado; revisar el reparto de `matches-service` | `Define room game and identity contracts` |
-| 4.2 | Preparar dentro del servicio actual la separación entre acceso a partidas y coordinación de salas, preservando la persistencia existente | `Separate game storage from room coordination` |
+| 4.2 | Preparar dentro del servicio actual la separación entre acceso a partidas y coordinación de salas, preservando la persistencia existente | `Separate SQLite game history from room storage` |
 
 Actualmente `Room` contiene un `Game` y el repositorio guarda sala y movimientos juntos. No basta con mover `CreateRoomUseCase` a otro proceso: crear una sala, asignar un asiento y registrar una partida pasarían a ser escrituras repartidas.
+
+En el paso 4.2, los casos de uso conservan el puerto `RoomRepository`. Su adaptador SQLite delega la lectura ordenada, la reconstrucción mediante `Game.replay` y la escritura de movimientos en `SqliteGameHistory`, un detalle interno del adaptador. El repositorio conserva la apertura y cierre de la conexión, la confirmación y la reversión; el componente de historial no confirma escrituras por separado. La lectura usa una transacción porque ahora consulta por separado los metadatos y los movimientos. Esta preparación aplica SRP sin añadir un segundo repositorio público que permita guardar solo media operación. La extracción a procesos y bases independientes corresponde a la fase 6.
 
 El contrato debe establecer quién conserva los asientos, cómo conoce `game-service` a los participantes autorizados y qué llamadas internas pueden configurarlos. Un token válido de un usuario no le permite mover en cualquier partida. No se debe crear un ciclo de llamadas bloqueantes entre servicios que mantengan sus propios bloqueos mientras esperan al otro.
 
@@ -284,7 +286,7 @@ El plan se actualizará si cambia el enunciado o una comprobación revela otra d
 
 ## 8. Siguiente acción concreta
 
-El paso 4.1 queda listo para un commit independiente: **`Define room game and identity contracts`**. El siguiente trabajo es **el 4.2: preparar la separación entre acceso a partidas y coordinación de salas dentro del servicio actual**, conservando el guardado atómico de sala y movimientos. Las operaciones internas distribuidas, la autenticación de cuentas y la deduplicación definidas en el README siguen siendo requisitos para fases posteriores, no funcionalidades ya desplegadas.
+Completado el paso 4.2, el siguiente trabajo es **el 5.1: definir el modelo de cuenta, su vínculo estable con el jugador y el esquema de cuentas**, conforme al orden del plan. Antes de introducir almacenamiento de contraseñas se debe explicar y acordar la biblioteca adecuada. Las operaciones internas distribuidas, la autenticación de cuentas y la deduplicación definidas en el README siguen siendo requisitos para fases posteriores, no funcionalidades ya desplegadas.
 
 La creación de este documento no implementa estas fases ni crea un commit.
 

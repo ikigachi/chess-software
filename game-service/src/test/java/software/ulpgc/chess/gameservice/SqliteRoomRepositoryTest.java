@@ -50,6 +50,52 @@ class SqliteRoomRepositoryTest {
         assertEquals(Piece.WhiteKnight, restored.game().pieceAt(Square.at("a8")));
     }
 
+    @Test void continuesAnExistingGameWithoutChangingIdentifiersDatesOrAnotherRoomsHistory() throws Exception {
+        Path database = directory.resolve("rooms.sqlite");
+        var repository = repository(database);
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+             var rooms = connection.prepareStatement("""
+                     INSERT INTO rooms (code, game_id, white_id, white_name, black_id, black_name, created_at)
+                     VALUES (?, ?, 'white', 'Alice', 'black', 'Bob', '2026-11-17 12:00:00')
+                     """);
+             var moves = connection.prepareStatement("""
+                     INSERT INTO moves (room_code, ply, origin, destination) VALUES (?, 1, ?, ?)
+                     """)) {
+            for (int index = 1; index <= 2; index++) {
+                String code = "ROOM0" + index;
+                rooms.setString(1, code);
+                rooms.setString(2, "stored-game-" + index);
+                rooms.executeUpdate();
+                moves.setString(1, code);
+                moves.setString(2, index == 1 ? "e2" : "d2");
+                moves.setString(3, index == 1 ? "e4" : "d4");
+                moves.executeUpdate();
+            }
+        }
+
+        Room first = repository.findByCode("ROOM01").orElseThrow();
+        Room second = repository.findByCode("ROOM02").orElseThrow();
+        assertEquals("stored-game-1", first.game().id());
+        assertEquals("stored-game-2", second.game().id());
+        assertEquals(List.of(move("e2e4", null)), first.game().moves());
+        assertEquals(List.of(move("d2d4", null)), second.game().moves());
+        Room continued = first.move(first.black(), move("e7e5", null));
+        repository.save(continued);
+
+        var reopened = repository(database);
+        assertEquals(continued, reopened.findByCode(first.code()).orElseThrow());
+        assertEquals(second, reopened.findByCode(second.code()).orElseThrow());
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+             var query = connection.prepareStatement("SELECT created_at FROM rooms ORDER BY code");
+             var rows = query.executeQuery()) {
+            for (int index = 0; index < 2; index++) {
+                assertTrue(rows.next());
+                assertEquals("2026-11-17 12:00:00", rows.getString("created_at"));
+            }
+            assertFalse(rows.next());
+        }
+    }
+
     @Test void aFailedSavePreservesBothPlayersAndTheExistingHistory() throws Exception {
         Path database = directory.resolve("rooms.sqlite");
         var repository = repository(database);
