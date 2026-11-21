@@ -8,7 +8,7 @@ Este documento se escribe en español por petición expresa del usuario. El cód
 
 ## 1. Punto de partida comprobado
 
-El paso 4.1 está guardado en `3f4ddfa`, con los contratos y su prueba de permisos entre dos salas. Este cambio completa el paso 4.2: `SqliteRoomRepository` coordina los datos de sala y la transacción, mientras `SqliteGameHistory` reconstruye la partida y guarda sus movimientos ordenados usando la misma conexión. Las lecturas de ambas partes también comparten una transacción. La verificación pasa 129 pruebas Java, incluidas las cuatro de Docker, sin fallos ni omisiones. Se conserva el esquema y se comprueba la continuación de datos existentes sin cambiar identificadores, fechas ni otras salas.
+El paso 4.2 está guardado en `630ad05`, con la separación interna de historial y sala. Este cambio completa el paso 5.1: `register-service` contiene el modelo `Account`, su asociación con el identificador estable del jugador, el puerto `AccountRepository`, el adaptador SQLite y `account-schema.sql`. El reactor tiene cinco módulos, pero continúan ejecutándose los dos servicios Java y NGINX. La verificación pasa 138 pruebas Java, incluidas nueve nuevas de cuentas y las cuatro de Docker, sin fallos ni omisiones en los resultados finales. Las rutas públicas, los datos de perfiles y las partidas conservan su funcionamiento actual.
 
 | Elemento | Situación actual |
 | --- | --- |
@@ -16,11 +16,13 @@ El paso 4.1 está guardado en `3f4ddfa`, con los contratos y su prueba de permis
 | `game-service` | Salas, sesiones, movimientos y persistencia de salas y partidas en SQLite; puerto 8081 |
 | `player-service` | Identidades estables y operaciones sobre nombres de perfil; perfiles persistentes en SQLite; puerto 8082 |
 | Docker Compose | NGINX sirve el frontend y reenvía `/api` y `/games` a `game-service`; `player-service` resuelve perfiles en otro contenedor; un volumen propio por servicio Java y solo el puerto web publicado |
+| Consul, salud y réplicas | Pendientes en 3.4 a 3.7; el despliegue actual usa DNS de Docker, una instancia de cada servicio y no ofrece `/health` |
 | `chess-frontend` | HTML, CSS, JavaScript y piezas SVG; no necesita un proceso Node.js |
 | Comunicación | Servidores Java con Javalin; JSON para crear y mover partidas; formularios todavía para unirse, refrescar y dejar de ver una sala |
 | Perfiles | Consulta y guardado explícito desde la interfaz mediante la API protegida; nombre de perfil separado del registrado en cada encuentro |
 | Historial | Movimientos persistentes y consulta de partida por código; todavía no hay una pantalla de listado de encuentros anteriores |
-| Otros servicios | `matches-service`, registro y autenticación todavía no están implementados |
+| `register-service` | Modelo de cuenta y almacenamiento SQLite preparados; todavía sin casos de uso, servidor HTTP ni contenedor |
+| Otros servicios | `matches-service` y autenticación todavía no están implementados |
 | ActiveMQ | No está incorporado ni se ha confirmado como requisito obligatorio |
 
 Ya funcionan la creación y unión a salas, los turnos, la sincronización por consultas periódicas, los avisos de desconexión, la recuperación de partidas y la conservación de participantes históricos tras cambiar un perfil.
@@ -38,6 +40,8 @@ Hay tres fuentes de alcance que conviene distinguir:
 El significado concreto de `matches-service` es una propuesta basada en lo compartido: coordinación de encuentros, salas y participantes, y consulta del listado histórico. Antes de una extracción que cambie el modelo, contrastar ese reparto con cualquier nueva indicación del profesor.
 
 El código de clase sirve como referencia para Javalin y para las operaciones HTTP. No se copiarán automáticamente sus clases, nombres de dominio ni partes incompletas si duplican conceptos que Regalia ya tiene.
+
+El usuario confirmó el 21 de noviembre de 2026 que ya ha completado la kata 5. Sus conceptos de NGINX, Consul, descubrimiento, réplicas y comprobaciones de salud pueden incorporarse al trabajo previsto. Su despliegue en Regalia sigue pendiente y debe respetar las dependencias de sesiones y concurrencia descritas en los pasos 3.4 a 3.7.
 
 ## 3. Responsabilidades y datos de destino
 
@@ -117,7 +121,7 @@ Si un cambio remoto se confirma pero se pierde su respuesta, consultar el perfil
 
 ### Fase 3. Introducir NGINX
 
-**Estado:** pasos 3.1 y 3.2 guardados en `d4d201e`. Paso 3.3 completado y verificado en este cambio. Se ha retirado `chess-backend` del reactor Maven y del contexto Docker. Sus 32 comprobaciones de API y estado inicial se ejecutan directamente en `game-service`; las comprobaciones de recursos, aislamiento del texto del jugador y fallo del gateway se conservan en las cuatro pruebas Docker de `chess-frontend`. La compilación limpia pasa 127 pruebas Java. Compose sigue arrancando NGINX y los dos servicios Java con sus volúmenes independientes.
+**Estado:** pasos 3.1 y 3.2 guardados en `d4d201e` y paso 3.3 en `da1a31a`. Se ha retirado `chess-backend` del reactor Maven y del contexto Docker. Sus 32 comprobaciones de API y estado inicial se ejecutan directamente en `game-service`; las comprobaciones de recursos, aislamiento del texto del jugador y fallo del gateway se conservan en las cuatro pruebas Docker de `chess-frontend`. La compilación limpia de esa extracción pasó 127 pruebas Java. Compose sigue arrancando NGINX y los dos servicios Java con sus volúmenes independientes. La ampliación de kata 5 de los pasos 3.4 a 3.7 sigue pendiente.
 
 **Objetivo:** utilizar NGINX como entrada HTTP, sirviendo los archivos web y reenviando las llamadas al servicio adecuado.
 
@@ -126,22 +130,30 @@ Si un cambio remoto se confirma pero se pierde su respuesta, consultar el perfil
 | 3.1 | Añadir configuración versionada y ejecución local, con las rutas actuales y un origen único para el navegador | `Add NGINX frontend hosting and API routing` |
 | 3.2 | Comprobar cookies, JSON, errores, límites de cuerpo y tiempos de espera a través de NGINX | `Verify NGINX routing and service failure responses` |
 | 3.3 | Trasladar las comprobaciones que correspondan y retirar `chess-backend` cuando sus responsabilidades estén cubiertas | `Replace the Java gateway with NGINX` |
+| 3.4 | Añadir `/health` en los servicios y Consul como contenedor de Compose; registrar cada instancia con sus comprobaciones de salud | `Add Consul service registration and health checks` |
+| 3.5 | Preparar las sesiones y las escrituras sobre partidas para su uso desde varias instancias, verificando el estado compartido y los conflictos | `Prepare sessions and game updates for replication` |
+| 3.6 | Configurar dos grupos upstream dinámicos en NGINX mediante Consul, con al menos dos réplicas por grupo y las mismas URL públicas | `Discover replicated upstreams through Consul` |
+| 3.7 | Comprobar reparto de peticiones, caída y reincorporación de una réplica y actualización del descubrimiento sin perder identidad ni movimientos | `Verify service discovery and replica recovery` |
 
 La configuración está en `infrastructure/nginx/default.conf.template` y se ejecuta desde el `compose.yaml` de la raíz. El Dockerfile tiene una etapa de compilación y destinos separados para `player-service` y `game-service`, con JDK 27 y bases fijadas por digest. Los nombres de Compose resuelven las conexiones dentro de la red Docker. El despliegue se ha comprobado en Docker Desktop con contenedores Linux en Windows.
 
-Las indicaciones de kata 5 sobre Consul, dos upstreams, réplicas y `/health` se incorporarán cuando se preparen sus garantías. Este despliegue ejecuta una instancia de cada servicio. Antes de replicar `game-service` hay que resolver las sesiones en memoria y la coordinación de operaciones sobre una partida; no se obtiene esa garantía solo al duplicar contenedores.
+El despliegue actual ejecuta una instancia de cada servicio y resuelve sus nombres mediante el DNS de Docker; no contiene Consul, grupos upstream replicados ni rutas `/health`. Consul será otro contenedor del mismo entorno Docker, con un catálogo de instancias y comprobaciones de salud. NGINX deberá configurarse para utilizar ese descubrimiento: añadir el contenedor no realiza esa conexión por sí solo.
+
+Los pasos 3.4 a 3.7 son una ampliación pendiente, no sustituyen el siguiente paso activo 5.2. Se podrán añadir salud y registro con una sola instancia para comprobarlos primero. La solución de sesiones del paso 3.5 debe coordinarse con el ciclo de vida de autenticación del paso 5.3; antes de activar réplicas también hay que resolver las escrituras simultáneas de las partidas y la coordinación de encuentros que se extraerá en la fase 6. Una cookie compartida por el navegador no comparte los mapas de sesión entre procesos, y un bloqueo Java solo protege una instancia. Duplicar contenedores o compartir un archivo SQLite no aporta por sí solo esas garantías. Elegir los dos grupos concretos cuando estén definidos sus servicios, manteniendo un único propietario de escritura por conjunto de datos y comprobando los conflictos antes de habilitar el reparto.
 
 Inicialmente, `/games` y las operaciones públicas de `/api/` seguirán llegando a `game-service`. El endpoint interno que recibe credenciales de jugador no se publicará automáticamente por tener un prefijo `/players`.
 
 Conservar las cabeceras relevantes y los mensajes de error de la aplicación. Una caída del upstream debe producir una respuesta comprensible para `RoomApi`, no una página HTML que el navegador intente interpretar como JSON. Las reglas del ajedrez siguen en Java y los servidores Java siguen usando Javalin.
 
-La migración de pruebas y la retirada del gateway Java están realizadas en el paso 3.3 local. El frontend conserva su ejecución HTML, CSS y JavaScript; las dependencias Java añadidas a su POM son solo de pruebas. No se ha creado un módulo adicional para las comprobaciones del despliegue.
+La migración de pruebas y la retirada del gateway Java están realizadas en el paso 3.3. El frontend conserva su ejecución HTML, CSS y JavaScript; las dependencias Java añadidas a su POM son solo de pruebas. No se ha creado un módulo adicional para las comprobaciones del despliegue.
 
 **Cierre:** dos usuarios crean, se unen, juegan y reabren una partida entrando por NGINX. El arranque documentado ya no requiere el gateway Java y funciona desde una copia limpia.
 
+**Cierre de la ampliación:** Consul descubre instancias registradas y comprueba su salud; NGINX mantiene dos grupos dinámicos con al menos dos réplicas por grupo. El fallo de una réplica y su reincorporación conservan las sesiones conforme al contrato y no generan movimientos duplicados ni actualizaciones perdidas. Las URL públicas permanecen estables y las pruebas usan proyectos y volúmenes temporales propios.
+
 ### Fase 4. Preparar los límites antes de mover salas
 
-**Estado:** paso 4.1 guardado y subido en `3f4ddfa`; paso 4.2 completado y verificado en este cambio. El README distingue contratos actuales de requisitos de la extracción: identificadores, nombres históricos, pertenencia, sala vista, actor de sesión y futura cuenta autenticada. La prueba HTTP confirma los permisos por identidad con independencia de la sala vista. El almacenamiento interno separa metadatos de sala e historial de partida en dos componentes cohesionados, con una única conexión y transacción para cada operación de repositorio. Una prueba sobre datos existentes comprueba identificadores de sala y partida distintos, fechas, participantes y aislamiento entre historiales. Siguen pasando las pruebas de promoción, historial inválido, recuperación y reversión de escrituras. No se han añadido procesos, puertos de aplicación ni cambios de esquema.
+**Estado:** paso 4.1 guardado y subido en `3f4ddfa`; paso 4.2 guardado y subido en `630ad05`. El README distingue contratos actuales de requisitos de la extracción: identificadores, nombres históricos, pertenencia, sala vista, actor de sesión y futura cuenta autenticada. La prueba HTTP confirma los permisos por identidad con independencia de la sala vista. El almacenamiento interno separa metadatos de sala e historial de partida en dos componentes cohesionados, con una única conexión y transacción para cada operación de repositorio. Una prueba sobre datos existentes comprueba identificadores de sala y partida distintos, fechas, participantes y aislamiento entre historiales. Siguen pasando las pruebas de promoción, historial inválido, recuperación y reversión de escrituras. No se han añadido procesos, puertos de aplicación ni cambios de esquema en esta fase.
 
 **Objetivo:** definir la propiedad de los datos y la identidad que recibe cada operación, sin romper la transacción actual.
 
@@ -160,6 +172,8 @@ El contrato debe establecer quién conserva los asientos, cómo conoce `game-ser
 
 ### Fase 5. Registro y autenticación
 
+**Estado:** paso 5.1 completado y verificado en este cambio. El nuevo módulo `register-service` contiene `Account`, `AccountStatus`, `AccountRepository`, `SqliteAccountDatabase` y `SqliteAccountRepository`. El esquema impone identificadores, nombres de acceso y asociaciones con jugadores únicos. Nueve pruebas comprueban las invariantes, la normalización, la baja como valor del dominio, los duplicados sin reemplazo, los datos persistidos, el reinicio y los fallos. Las cuatro pruebas Docker también pasan con el reactor de cinco módulos. Las altas y bajas por HTTP, el almacenamiento de contraseñas y las sesiones autenticadas siguen pendientes.
+
 **Objetivo:** diferenciar cuentas, perfiles y participantes históricos, permitiendo identificar al mismo usuario desde otro navegador.
 
 | Paso | Trabajo | Posible commit |
@@ -169,6 +183,10 @@ El contrato debe establecer quién conserva los asientos, cómo conoce `game-ser
 | 5.3 | Implementar autenticación, cierre de sesión, caducidad y comprobación de cuenta activa | `Add account authentication and session lifecycle` |
 | 5.4 | Conectar la identidad verificada con las operaciones protegidas y añadir las pantallas necesarias | `Connect authenticated users to profiles and games` |
 
+El nombre de acceso se distingue del nombre público: admite entre 3 y 40 caracteres ASCII, con letras, dígitos, punto, guion y guion bajo; se eliminan espacios exteriores y se guarda en minúsculas. No se ha elegido el correo electrónico como identificador de acceso. Cada cuenta tiene su propio identificador y referencia un `User.id` existente mediante `playerId`, sin copiar su perfil ni cambiar los participantes de una sala. La propiedad de esa identidad deberá comprobarse desde el servidor al implementar el alta; el repositorio no autentica al dueño del identificador recibido.
+
+El puerto permite insertar una cuenta y consultar por nombre de acceso o jugador. Insertar no actualiza ni reactiva una cuenta existente. Las cuentas inactivas conservan el nombre de acceso y la asociación, evitando que otro registro se los apropie. `Account.deactivate()` devuelve un valor inactivo que conserva la identidad; todavía no existe la operación de aplicación que guarde esa baja ni invalide sesiones. El adaptador recibe una ruta explícita; `.regalia/accounts.sqlite` es la ubicación prevista cuando exista el arranque del servicio. El esquema actual no incluye contraseñas, y las pruebas usan bases temporales.
+
 Registro y autenticación usarán la misma base de cuentas, conforme a lo indicado en clase. Esto no implica que todos los servicios puedan escribir las tablas de cuentas ni que deban compartir una conexión JDBC global. La creación del esquema y las escrituras de cada componente tendrán una responsabilidad definida.
 
 Los identificadores públicos y los nombres se conservan en `player-service`. Las contraseñas y la información privada de acceso no se introducen en `User`, en respuestas públicas ni en los registros históricos. Seleccionar una biblioteca adecuada para almacenar y verificar contraseñas; el SHA-256 actual deriva identificadores de invitados y no es una solución para almacenar contraseñas. No implementar criptografía propia. Referencia: [guía de almacenamiento de contraseñas de OWASP](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
@@ -177,7 +195,7 @@ Conservar el vínculo con las partidas del invitado al registrar su cuenta cuand
 
 La baja desactiva el acceso y las sesiones correspondientes, pero no borra las partidas ni sus participantes. La autenticación de cuentas es distinta de la presencia durante una partida: cerrar sesión, dejar de ver una sala y perder conexión son situaciones diferentes.
 
-Antes de introducir bibliotecas o técnicas no autorizadas, explicar la elección y consultar al usuario. Esta fase queda planificada, no implementada por este documento.
+Antes de introducir bibliotecas o técnicas no autorizadas, explicar la elección y consultar al usuario. El paso 5.1 solo utiliza Java, JDBC, SQLite y JUnit ya autorizados; las bibliotecas de contraseñas y los pasos 5.2 a 5.4 siguen pendientes.
 
 **Cierre:** altas duplicadas y credenciales inválidas se rechazan; el cierre y la baja invalidan el acceso; otro navegador recupera la identidad correcta; el historial anterior permanece consultable según la política de acceso acordada.
 
@@ -190,8 +208,11 @@ Antes de introducir bibliotecas o técnicas no autorizadas, explicar la elecció
 | 6.1 | Implementar la consulta de encuentros y un puerto de acceso a partidas, sin duplicar movimientos | `Add match queries through application ports` |
 | 6.2 | Migrar la creación y unión a salas mediante operaciones recuperables | `Move room creation and joining to matches-service` |
 | 6.3 | Conectar los servicios y el frontend y retirar la coordinación antigua cuando se verifique la migración | `Route room coordination through matches-service` |
+| 6.4 | Sustituir las acciones genéricas restantes por rutas y cuerpos JSON que expresen salas, participantes y sala vista; actualizar frontend, NGINX y pruebas antes de retirar rutas heredadas | `Replace legacy room actions with resource routes` |
 
 Primero se puede extraer una consulta para comprobar el contrato y el proceso independiente. No se declarará completada la separación mientras las escrituras sigan en el servicio anterior.
+
+Las URL ya mejoradas son `POST /games` para crear, `GET /games/{id}` para consultar, `PUT /games/{id}` para mover y `GET` y `PUT /api/profile` para el perfil. El navegador utiliza un único origen público, por defecto `http://127.0.0.1:8080`. La incorporación de Consul y réplicas debe conservar esa dirección y esas rutas, aunque cambien las direcciones internas. Queda pendiente que unirse, refrescar y dejar de ver una sala dejen de compartir `POST /api/action` con formularios. Antes de cambiarlo, definir el recurso y el contrato de cada operación: dejar de ver una sala no libera un asiento ni elimina la pertenencia histórica. Migrar los consumidores y las pruebas, mantener la compatibilidad durante la transición y retirar la ruta antigua cuando deje de utilizarse.
 
 Para repartir las escrituras, definir una clave estable de operación y peticiones idempotentes: repetir la misma creación no debe producir dos partidas. Reservar asientos de forma que dos usuarios concurrentes no puedan obtener el puesto de negras. Reabrir una sala con el mismo jugador debe seguir funcionando.
 
@@ -269,6 +290,8 @@ Docker está autorizado para NGINX y ActiveMQ. Mantener el resto de herramientas
 | Caída de un servicio | Error comprensible y ausencia de éxitos falsos o duplicados al reintentar |
 | Cambiar de adaptador por un doble | Los casos de uso siguen funcionando sin importar infraestructura |
 | Baja de cuenta | Acceso revocado y conservación del registro de partidas |
+| Consul, dos grupos upstream y réplicas | Descubrimiento y reparto comprobados; una instancia caída deja de recibir tráfico tras detectarse el fallo y su reincorporación no pierde identidad ni movimientos |
+| Migración de rutas de salas | Frontend y NGINX usan el contrato actualizado; dejar de ver una sala preserva la pertenencia y las rutas antiguas solo se retiran tras migrar sus consumidores |
 | Broker detenido o evento repetido, si existe | Recuperación según el contrato y ausencia de efectos duplicados |
 
 Las pruebas se ejecutarán según el comportamiento afectado. No se escribirán pruebas que solo repitan la implementación ni se ampliará la suite indefinidamente cuando las comprobaciones necesarias ya pasen.
@@ -286,7 +309,7 @@ El plan se actualizará si cambia el enunciado o una comprobación revela otra d
 
 ## 8. Siguiente acción concreta
 
-Completado el paso 4.2, el siguiente trabajo es **el 5.1: definir el modelo de cuenta, su vínculo estable con el jugador y el esquema de cuentas**, conforme al orden del plan. Antes de introducir almacenamiento de contraseñas se debe explicar y acordar la biblioteca adecuada. Las operaciones internas distribuidas, la autenticación de cuentas y la deduplicación definidas en el README siguen siendo requisitos para fases posteriores, no funcionalidades ya desplegadas.
+Completado el paso 5.1, el siguiente trabajo es **el 5.2: implementar altas y bajas en register-service**, con casos de uso, puertos y adaptadores HTTP. Antes de guardar credenciales se debe explicar y acordar la biblioteca de contraseñas adecuada. El alta deberá resolver la identidad desde el servidor, mantener la asociación existente y guardar cuenta y credenciales de forma atómica. La autenticación, la invalidación de sesiones y la conexión de las pantallas correspondientes se completarán en los pasos 5.3 y 5.4; las operaciones internas distribuidas y la deduplicación siguen correspondiendo a fases posteriores. Consul, `/health`, upstreams y réplicas quedan desglosados en los pasos 3.4 a 3.7, con sus dependencias; la mejora pendiente de URL queda en el paso 6.4.
 
 La creación de este documento no implementa estas fases ni crea un commit.
 
@@ -318,7 +341,7 @@ Las indicaciones posteriores de clase también tienen cobertura explícita:
 | `matches-service` | 4, 6 y 7 |
 | `register-service` | 5 |
 | Autenticación y base compartida con registro | 5 |
-| NGINX | 3 y actualización de rutas al incorporar los demás servicios |
+| NGINX y Consul | 3.1 a 3.3 completados; 3.4 a 3.7 pendientes para salud, descubrimiento y réplicas; actualización de rutas en 6.3 y 6.4 |
 | ActiveMQ | 8, únicamente si se confirma su necesidad o su obligatoriedad |
 
 Los entregables que completan el alcance son:
@@ -344,5 +367,6 @@ El proyecto completo se considerará cerrado cuando:
 5. La separación en módulos conserve las reglas de ajedrez, la arquitectura hexagonal proporcionada y el funcionamiento del frontend.
 6. Las pruebas y el recorrido desde una copia limpia estén comprobados, y el README, las capturas y la configuración representen esa misma versión.
 7. ActiveMQ tenga una decisión explícita: incorporado con un caso útil y sus garantías verificadas, o descartado por falta de necesidad y de exigencia del profesor.
+8. La ampliación de kata 5 esté comprobada: Consul, `/health` y dos grupos upstream dinámicos con al menos dos réplicas por grupo, conservando sesiones y escrituras correctas ante fallos. La migración de URL debe mantener los contratos públicos y retirar `/api/action` cuando sus consumidores se hayan actualizado.
 
 Este cierre abarca el proyecto completo conocido a esta fecha. Los extras opcionales se incorporarán si se acuerdan; una nueva indicación del profesor se añadirá a la tabla de cobertura y a su fase correspondiente.

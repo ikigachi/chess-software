@@ -9,11 +9,11 @@ Build a chess application where two users connect through a shared room code, pl
 | Dependency | Version or use |
 | --- | --- |
 | JDK | 27 |
-| Maven | Builds the four modules and resolves dependencies |
+| Maven | Builds the five modules and resolves dependencies |
 | Gson | 2.14.0, backend JSON serialization |
 | Javalin | 7.2.4, HTTP servers |
 | SLF4J Simple | 2.0.20, server logging |
-| SQLite JDBC | 3.54.1.0, room and player storage |
+| SQLite JDBC | 3.54.1.0, room, player and account storage |
 | JUnit Jupiter | 5.11.4, automated tests only |
 | Node.js | 24, optional frontend tests only; no frontend server or npm packages required |
 | Docker and Compose | Builds and runs NGINX and the two Java services; verified with Docker Desktop Linux containers on Windows |
@@ -106,6 +106,15 @@ docker compose down
 │       │   └── infrastructure/http/
 │       ├── main/resources/schema.sql
 │       └── test/java/software/ulpgc/chess/gameservice/
+├── register-service/
+│   ├── pom.xml
+│   └── src/
+│       ├── main/java/software/ulpgc/chess/registerservice/
+│       │   ├── application/domain/model/
+│       │   ├── application/ports/
+│       │   └── infrastructure/adapters/
+│       ├── main/resources/account-schema.sql
+│       └── test/java/software/ulpgc/chess/registerservice/
 ├── chess-frontend/
 │   ├── pom.xml
 │   └── src/
@@ -123,6 +132,8 @@ docker compose down
 ```
 
 `chess-core` defines the chess rules and data model and supports loading board positions from FEN. `player-service` resolves stable guest-player identities and stores public names in its own SQLite database. `game-service` executes room and game operations, manages sessions and stores matches. `chess-frontend` contains the board presentation, browser interactions and deployment checks. NGINX serves these assets and forwards public API requests to the game service.
+
+`register-service` currently provides the account model, storage port and SQLite adapter. It has no HTTP entry point or Compose container yet. The Docker build includes its POM so Maven can load the five-module reactor while building the two running Java services.
 
 ## System architecture
 
@@ -179,6 +190,22 @@ Game-service package paths are relative to `software/ulpgc/chess/gameservice`. I
 Room coordination and chess operations remain separate use cases. Within SQLite, `SqliteRoomRepository` handles room identifiers, participant snapshots and the game reference, while `SqliteGameHistory` handles move order, promotion values and replay. The history component receives the repository's connection and does not open connections or commit independently. Both reads share one transaction so room metadata and moves describe the same stored version; both writes share one transaction so a rejected history write also rolls back the room. This internal separation keeps the existing schema and data and prepares later extraction without introducing another public repository contract.
 
 `GameHttpServer` declares the Javalin routes, including `get("/games/{id}", ...)` and `post("/games", ...)`. Its handlers adapt the Javalin `Context` to the existing use cases. Room operations execute one at a time to preserve consistent updates. This follows the framework used in the classroom example.
+
+### Account model and storage foundation
+
+`register-service/application/domain/model/Account` represents account identity, a login username, the associated player identifier and `AccountStatus`. These packages are relative to `software/ulpgc/chess/registerservice`. An account starts `Active`; `deactivate()` returns an `Inactive` value with the same identifiers and username. This domain transition does not save itself or invalidate sessions. Registration, persisted deactivation, credentials and authenticated sessions belong to later steps.
+
+The username is separate from a public display name. It uses 3 to 40 ASCII letters, digits, dots, underscores or hyphens; surrounding whitespace is removed and letters are stored in lowercase. Thus `Alice` and `alice` identify the same login name. The account stores a reference to the existing player identifier, without copying a profile or rewriting room participants. The registration use case must obtain that identifier from a verified server-side identity; storing a string reference alone does not establish ownership of a player.
+
+`application/ports/AccountRepository` supports inserting an account and finding one by username or player identifier. `infrastructure/adapters/SqliteAccountRepository` implements this contract with prepared statements. Account identifiers, normalized usernames and player associations are unique, including for inactive accounts. Insertion rejects a duplicate and preserves the stored account rather than replacing it, changing its player association or reactivating it. Missing matches return `Optional.empty()`; database failures and invalid stored values remain errors with their causes.
+
+`SqliteAccountDatabase.initializeSchema()` explicitly applies `register-service/src/main/resources/account-schema.sql` and can run repeatedly without deleting accounts. Its constructor accepts the database path; the intended direct-service location is `.regalia/accounts.sqlite`, separate from the room and player files. Tests use temporary paths. No account database is opened by the existing game or player entry points. The account schema contains only `id`, `username`, `player_id` and `status`; password storage awaits the choice of a suitable hashing library. Registration will own schema initialization and account writes; authentication will later read this same account database with responsibilities for credentials and sessions defined before adding their tables. The player reference has no cross-database foreign key: the future registration use case must verify it through the identity contract.
+
+Verify this foundation independently with:
+
+```bash
+mvn -pl register-service test
+```
 
 ### Lightweight frontend architecture
 
@@ -245,7 +272,7 @@ These contracts describe the current application and the constraints for separat
 | Profile | `player-service` owns the current public name for a stable `User.id()`. Its name may differ from the names in recorded encounters. The player repository never writes rooms or moves. |
 | Acting player | The HTTP adapter resolves the current player from the server-side browser session. A write also checks that session's token. Browser-supplied `userId`, `id`, names or another session's token cannot select the actor. These are guest sessions, not authenticated accounts. |
 | Viewed room | The session's current room selects the board returned by `/api/state` and affects presence. It does not allocate a seat or define membership in other rooms. A participant can submit a legal move to a room they belong to while viewing another room. |
-| Account, planned | Registration and authentication will associate an account with the existing player identifier, check that the account is active and resolve its actor on the server. Account credentials and account identifiers will not replace historical player identifiers. |
+| Account | The model and schema associate an account identifier and unique login username with one player identifier and an active or inactive status. Registration and authentication are still planned; they must check ownership and active status and resolve the actor on the server. Account credentials and account identifiers will not replace historical player identifiers. |
 
 `User` is the existing immutable identifier-and-name value used for both profiles and historical participants. These roles do not require duplicate `Player` or `Participant` classes at this stage. A distinct actor type or internal service port will be introduced when an implemented use case needs its contract.
 
@@ -327,7 +354,7 @@ Run the Java checks that do not require Docker from the repository root:
 mvn test
 ```
 
-The Java suites contain 129 cases: 125 checks without Docker and four opt-in deployment checks. The latest run enabled Docker and passed all 129 cases with no failures or skips. The SQLite refactoring checks include continuing stored games while preserving distinct room and game identifiers, creation dates, historical participants and other rooms' histories. `GameHttpIntegrationTest` in `game-service` checks the API directly using separate game and player HTTP servers. Its 33 cases include the room, profile, session, JSON, concurrency, promotion, en passant, castling, result and restart checks from the former gateway suite, plus the two-room identity contract. Room and player repository contract tests run against SQLite and in-memory storage; storage tests cover rejected writes, invalid stored data and recovery. Docker checks in `chess-frontend` cover frontend hosting and HTTP forwarding, including the migrated markup, script and piece-asset checks. An unavailable game service produces `503` while the page remains accessible. To reproduce recovery, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
+The Java suites contain 138 cases: 134 checks without Docker and four opt-in deployment checks. The latest verification passed all 138 cases, including the four deployment checks after starting Docker Desktop. Nine new account checks cover domain invariants, normalized usernames, preserved player associations, duplicate rejection without replacement, repeated schema initialization, restart recovery, invalid stored data and storage failures. The SQLite refactoring checks include continuing stored games while preserving distinct room and game identifiers, creation dates, historical participants and other rooms' histories. `GameHttpIntegrationTest` in `game-service` checks the API directly using separate game and player HTTP servers. Its 33 cases include the room, profile, session, JSON, concurrency, promotion, en passant, castling, result and restart checks from the former gateway suite, plus the two-room identity contract. Room and player repository contract tests run against SQLite and in-memory storage; storage tests cover rejected writes, invalid stored data and recovery. Docker checks in `chess-frontend` cover frontend hosting and HTTP forwarding, including the migrated markup, script and piece-asset checks. An unavailable game service produces `503` while the page remains accessible. To reproduce recovery, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 
