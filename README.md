@@ -9,12 +9,12 @@ Build a chess application where two users connect through a shared room code, pl
 | Dependency | Version or use |
 | --- | --- |
 | JDK | 27 |
-| Maven | Builds the five modules and resolves dependencies |
+| Maven | Builds the six modules and resolves dependencies |
 | Gson | 2.14.0, backend JSON serialization |
 | Javalin | 7.2.4, HTTP servers |
 | SLF4J Simple | 2.0.20, server logging |
 | SQLite JDBC | 3.54.1.0, room, player and account storage |
-| Password4j | 1.8.4, Argon2id password hashing and verification in `register-service` |
+| Password4j | 1.8.4, Argon2id password hashing in registration and verification in authentication |
 | JUnit Jupiter | 5.11.4, automated tests only |
 | Node.js | 24, optional frontend tests only; no frontend server or npm packages required |
 | Docker and Compose | Builds and runs NGINX and the two Java services; verified with Docker Desktop Linux containers on Windows |
@@ -26,6 +26,8 @@ mvn compile
 ```
 
 In IntelliJ, open the root `pom.xml`, select JDK 27 and reload Maven. The browser deployment uses the Java entry points `software.ulpgc.chess.playerservice.Main` and `software.ulpgc.chess.gameservice.Main`. Docker Compose starts both services and NGINX together, as described below. The registration API can also run directly through `software.ulpgc.chess.registerservice.Main`; its setup is described under account registration below.
+
+The separate authentication API starts through `software.ulpgc.chess.authenticationservice.Main` after registration has initialized the shared account database. Its session routes and arguments are described below. These two account services are not yet connected to the board or included in Compose.
 
 For direct Java API development, start the player service first and then the game service, using the repository root as their working directory. They listen on `127.0.0.1:8082` and `127.0.0.1:8081`, with `.regalia/players.sqlite` and `.regalia/rooms.sqlite`. Their default ports and database files can be overridden with arguments: `8092 .regalia/test-players.sqlite` for players and `8091 .regalia/test.sqlite http://127.0.0.1:8092` for games. These direct API runs do not serve the browser assets; the browser deployment uses NGINX and the services in Compose.
 
@@ -118,6 +120,17 @@ docker compose down
 │       │   └── infrastructure/adapters/
 │       ├── main/resources/account-schema.sql
 │       └── test/java/software/ulpgc/chess/registerservice/
+├── authentication-service/
+│   ├── pom.xml
+│   └── src/
+│       ├── main/java/software/ulpgc/chess/authenticationservice/
+│       │   ├── Main.java
+│       │   ├── application/domain/model/
+│       │   ├── application/ports/
+│       │   ├── application/usecases/
+│       │   └── infrastructure/adapters/
+│       ├── main/resources/authentication-schema.sql
+│       └── test/java/software/ulpgc/chess/authenticationservice/
 ├── chess-frontend/
 │   ├── pom.xml
 │   └── src/
@@ -136,7 +149,7 @@ docker compose down
 
 `chess-core` defines the chess rules and data model and supports loading board positions from FEN. `player-service` resolves stable guest-player identities and stores public names in its own SQLite database. `game-service` executes room and game operations, manages sessions and stores matches. `chess-frontend` contains the board presentation, browser interactions and deployment checks. NGINX serves these assets and forwards public API requests to the game service.
 
-`register-service` provides account registration and deactivation through a separate Javalin server, with password hashing and its own SQLite file. It can run directly on port 8083; it is not yet included in Compose or routed through NGINX. The Docker build includes its POM so Maven can load the five-module reactor while building the two containerized Java services.
+`register-service` provides account registration and deactivation through a separate Javalin server on direct port 8083. `authentication-service` provides login, session validation and logout on direct port 8084. They share the account database with separate write responsibilities: registration owns account metadata and password hashes; authentication owns session rows. Neither is yet included in Compose or routed through NGINX. The Docker build includes their POMs so Maven can load the six-module reactor while building the two containerized Java services.
 
 ## System architecture
 
@@ -151,11 +164,11 @@ flowchart LR
 
 The browser uses one web origin served by NGINX. The game and player services run in separate Java processes using Javalin, with one container per service in Compose. When opening a session, the game service obtains its guest-player identity through the `PlayerIdentity` port and its HTTP adapter. The game service persists rooms in SQLite and manages active browser sessions in memory. The player service persists profile identifiers and names in a separate SQLite file and volume. Browser cookies let the original players reopen a saved room with its code after restarting the services.
 
-Player identity resolution and profile-name operations have been extracted, including frontend profile editing. NGINX hosting and routing are available through Compose. Names supplied when entering a room, room coordination and browser sessions remain in `game-service` during this step. Matches, registration and authentication services are pending.
+Player identity resolution and profile-name operations have been extracted, including frontend profile editing. NGINX hosting and routing are available through Compose. Names supplied when entering a room, room coordination and guest browser sessions remain in `game-service`. Registration and authentication are implemented as directly runnable private services; their board integration and deployment are pending. `matches-service` remains planned.
 
 ### Planned service boundaries
 
-This is the target for the next extractions. Player and game services and the NGINX web entry point are implemented. The remaining service extractions are pending.
+This table records the responsibility split. Player, game, registration and authentication processes are implemented; matches extraction and the board's transition from guest to authenticated sessions are pending.
 
 | Component | Responsibility and data ownership |
 | --- | --- |
@@ -163,13 +176,13 @@ This is the target for the next extractions. Player and game services and the NG
 | `game-service` | Authoritative chess state, move validation, ordered move history and game result |
 | `matches-service` | Room codes, White and Black seats, participant records, creation date and associated game identifier; lists matches and obtains their state and moves from `game-service` |
 | `register-service` | Account creation and deactivation, account status and the association with a stable player identifier |
-| Authentication service | Checks active accounts and credentials and manages authenticated sessions; shares the account database with `register-service`, as discussed in class |
+| `authentication-service` | Reads active accounts and password hashes and owns authenticated session rows in the shared account database |
 | Frontend | Board presentation and user interaction through the service contracts |
 | NGINX | Serves frontend files and routes HTTP requests to the services |
 
 A participant record preserves the player identifier and display name used in that match. Account deactivation must end access while preserving recorded matches and moves. A display-name change must not rewrite the names recorded in earlier matches. Services identify the acting user from a verified session, rather than trusting a player identifier supplied by the frontend.
 
-Services communicate through HTTP and JSON using application ports and infrastructure adapters. Each service controls writes to its own data; registration and authentication will share account storage. Until room and game storage have been separated with failure handling in place, the existing room-and-move transaction stays in `game-service`. NGINX handles HTTP forwarding and frontend hosting. Direct API checks belong to `game-service`; frontend files and gateway behavior are checked through the Docker deployment tests in `chess-frontend`.
+Services communicate through HTTP and JSON using application ports and infrastructure adapters. Each service controls writes to its own data; registration and authentication share the account file but write different tables. Until room and game storage have been separated with failure handling in place, the existing room-and-move transaction stays in `game-service`. NGINX handles HTTP forwarding and frontend hosting. Direct API checks belong to their Java service modules; frontend files and gateway behavior are checked through the Docker deployment tests in `chess-frontend`.
 
 ### Backend hexagonal architecture
 
@@ -204,7 +217,7 @@ The username is separate from a public display name. It uses 3 to 40 ASCII lette
 
 `Argon2PasswordHasher` encapsulates Password4j 1.8.4. Registration accepts passwords of 15 to 128 Unicode code points, preserving spaces and case. Each hash uses Argon2id version 19, 19456 KiB of memory, two iterations, parallelism one, a 32-byte output and an independent 16-byte random salt. The stored encoding includes the salt and parameters needed for verification. Plaintext passwords and guest credentials are not stored or returned. This follows the [OWASP password storage guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html); the adapter uses the [Password4j library](https://github.com/Password4j/password4j).
 
-`SqliteAccountDatabase.initializeSchema()` explicitly applies `register-service/src/main/resources/account-schema.sql` to `.regalia/accounts.sqlite` by default. Repeated initialization preserves accounts and adds `account_passwords` without changing old identifiers or statuses. That table references `accounts.id`, with foreign keys enabled for each connection. Legacy accounts without a hash remain unchanged and receive no default password; an explicit credential-enrollment process would be required to make them usable for authentication. Registration owns schema initialization, account metadata, password hashes and account status. Authentication will later read these records from the same database and own its session operations. The player reference has no cross-database foreign key and is resolved through the identity port. Existing game and player entry points never open this database.
+`SqliteAccountDatabase.initializeSchema()` explicitly applies `register-service/src/main/resources/account-schema.sql` to `.regalia/accounts.sqlite` by default. Repeated initialization preserves accounts and adds `account_passwords` without changing old identifiers or statuses. That table references `accounts.id`, with foreign keys enabled for each connection. Legacy accounts without a hash remain unchanged and receive no default password; an explicit credential-enrollment process would be required to make them usable for authentication. Registration owns schema initialization, account metadata, password hashes and account status. Authentication reads these records from the same database and owns its session operations. The player reference has no cross-database foreign key and is resolved through the identity port. Existing game and player entry points never open this database.
 
 Start the player service first, then run `software.ulpgc.chess.registerservice.Main` in IntelliJ with the repository root as its working directory. It defaults to `127.0.0.1:8083`, `.regalia/accounts.sqlite` and player origin `http://127.0.0.1:8082`. Optional arguments follow this order: `8093 .regalia/test-accounts.sqlite http://127.0.0.1:8092 127.0.0.1`. The final bind address defaults to loopback. The HTTP client and server close explicitly when the process stops.
 
@@ -217,12 +230,38 @@ The current registration routes are private service operations:
 
 Both require `application/json` and accept at most 8192 bytes. Invalid input or JSON returns `400`, duplicate registration `409`, an incorrect password or unavailable active account during deactivation `401`, unsupported content `415`, an oversized body `413`, and an identity or storage failure `503`. Responses use JSON and `Cache-Control: no-store` and contain no password, hash or guest credential. Deactivation resolves the account through the credential's player and verifies its password; supplying another account identifier cannot choose the target. It retains the username, player association and password hash, and never deletes match data. Registration has no retry key: a lost acknowledgement can follow a committed account, and a repeated request then returns a conflict.
 
-These operations are not browser endpoints yet: NGINX still routes only `/api` and `/games`, and the board continues to use guest sessions. A future public adapter must obtain the guest credential from its server-side session and check its token, as the profile adapter already does. Authenticated login, logout, expiry, session revocation on deactivation and the frontend forms belong to steps 5.3 and 5.4. Setting an account inactive currently does not revoke the independent game-service guest session.
+These operations are not browser endpoints yet: NGINX still routes only `/api` and `/games`, and the board continues to use guest sessions. A future public adapter must obtain the guest credential from its server-side session and check its token, as the profile adapter already does. Account deactivation now blocks authenticated sessions through the authentication service, but still does not revoke the independent game-service guest session. The board's authenticated identity checks and forms belong to step 5.4.
 
 Verify the registration service and its test dependencies with:
 
 ```bash
 mvn -pl register-service -am test
+```
+
+### Authentication and session lifecycle
+
+`authentication-service` has its own `Main`, Javalin server, use cases and ports. Its production code has no Java dependency on `register-service`. `AccountCredentials` is a private read projection containing the account identifier, associated player identifier and encoded password hash; it does not duplicate the account entity or profile. `AccountCredentialsReader` exposes only the read needed for login. `PasswordVerifier` hides Password4j, `SessionRepository` controls session persistence and `SessionTokens` hides random token generation and digesting. Tests can substitute these ports and inject a clock.
+
+Start registration first so that `.regalia/accounts.sqlite` contains `accounts` and `account_passwords`, then run `software.ulpgc.chess.authenticationservice.Main` from the repository root. It defaults to `127.0.0.1:8084` and the same account file. Optional arguments are `8094 .regalia/test-accounts.sqlite 127.0.0.1`. Authentication opens the file in SQLite `mode=rw`: a missing file or missing account schema fails startup rather than creating a second account store. It initializes only `authentication-service/src/main/resources/authentication-schema.sql`, which adds `authentication_sessions` and its indexes without rewriting existing accounts or hashes.
+
+| Method and path | Input | Successful result |
+| --- | --- | --- |
+| `POST /sessions` | JSON `username` and `password` | `201` with a new `token`, `accountId`, stable `playerId` and absolute `expiresAt` |
+| `GET /sessions/current` | `Authorization: Bearer <token>` | `200` with `accountId`, `playerId` and `expiresAt`; records current session activity |
+| `DELETE /sessions/current` | `Authorization: Bearer <token>` | `204` with no body; revokes that session and can be repeated |
+
+Login resolves an active account with stored credentials and verifies the exact password. Unknown users, inactive accounts, legacy accounts without a hash and wrong passwords receive the same `401` response. An unavailable account also performs a dummy Argon2id verification; this avoids skipping the expensive password operation, without promising identical response times. Supplied tokens, identifiers and expiry dates do not select or configure the resulting session. Different browsers can log in with the same account, receive independent tokens and recover the same recorded player identifier without the original guest cookie.
+
+Tokens contain 32 bytes from `SecureRandom`, encoded as 43 canonical Base64url characters. SQLite stores only their SHA-256 digest, never the bearer token itself. This fast digest verifies a random secret; passwords continue to use Argon2id. The token is returned only by login and is accepted only in the Authorization header for session operations, not in a URL, body or cookie. Responses use `Cache-Control: no-store`, and session queries do not return tokens or password hashes. See the [OWASP session guidance](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html).
+
+Sessions have an absolute eight-hour lifetime and expire after thirty minutes without activity. Both boundaries are checked on the server; a successful session query refreshes activity but cannot extend the absolute deadline. Session creation atomically checks that the account is still active, saves the digest and removes expired, idle or inactive sessions. A failed insert rolls back that cleanup as well. Logout removes only the selected session. Session resolution checks the current account status in the same transaction as the activity update, so deactivation blocks every outstanding token on its next validation, including after an authentication-service restart. Inactive-session rows can remain until logout or the next successful login cleanup, but cannot authorize access. A storage failure returns `503` and never reports a successful login or logout.
+
+Login uses the same JSON content and 8192-byte body limits as registration, with `400`, `415` and `413` for malformed input, unsupported content and oversized bodies. Invalid, missing, revoked or expired bearer tokens return `401`; unavailable storage returns `503`. Browser cookies, public login controls and the connection of this identity to room permissions are still pending in step 5.4. The existing guest board is not yet protected by these account sessions.
+
+Verify authentication, registration compatibility and session recovery with:
+
+```bash
+mvn -pl authentication-service -am test
 ```
 
 ### Lightweight frontend architecture
@@ -239,7 +278,7 @@ mvn -pl register-service -am test
 
 ## Communication contract
 
-The game service calls `POST /players/resolve` on the player-service origin with a JSON `credential` containing the browser's canonical UUID cookie value. The response contains `id` and the saved profile `name`, or `Guest` for an unnamed player. The identifier preserves the previous SHA-256 mapping, so existing players keep their seats after the extraction. Invalid credentials or JSON return `400`; unsupported methods, content types and oversized bodies return `405`, `415` and `413`. This is guest identity resolution; account authentication is pending.
+The game service calls `POST /players/resolve` on the player-service origin with a JSON `credential` containing the browser's canonical UUID cookie value. The response contains `id` and the saved profile `name`, or `Guest` for an unnamed player. The identifier preserves the previous SHA-256 mapping, so existing players keep their seats after the extraction. Invalid credentials or JSON return `400`; unsupported methods, content types and oversized bodies return `405`, `415` and `413`. This remains guest identity resolution; the separate account authentication API is not yet connected to the board.
 
 `PUT /players/name` on the player-service origin accepts JSON with `credential` and `name`, and returns the same identifier with the updated name. Names are trimmed and must contain between 1 and 40 characters. Invalid requests leave the previous name unchanged. This is an independent profile operation: creating or joining a room does not rename the profile. A new game-service session loads the saved profile name; existing sessions retain their current name. Names recorded in earlier rooms and games remain unchanged. Profiles are stored in `.regalia/players.sqlite` and retain their names and identifiers after the player service restarts. Storage failures return `503` and preserve the previous profile.
 
@@ -280,7 +319,7 @@ The server rejects moves that leave the moving player's king in check or attempt
 
 ### Room, game and identity contracts
 
-These contracts describe the current application and the constraints for separating matches from games. `matches-service` and account authentication are planned; they are not running services yet.
+These contracts describe the current application and the constraints for separating matches from games. `matches-service` is planned; private registration and authentication APIs are implemented, while the browser board still uses guest sessions.
 
 | Concept | Identity and guarantees |
 | --- | --- |
@@ -290,7 +329,7 @@ These contracts describe the current application and the constraints for separat
 | Profile | `player-service` owns the current public name for a stable `User.id()`. Its name may differ from the names in recorded encounters. The player repository never writes rooms or moves. |
 | Acting player | The HTTP adapter resolves the current player from the server-side browser session. A write also checks that session's token. Browser-supplied `userId`, `id`, names or another session's token cannot select the actor. These are guest sessions, not authenticated accounts. |
 | Viewed room | The session's current room selects the board returned by `/api/state` and affects presence. It does not allocate a seat or define membership in other rooms. A participant can submit a legal move to a room they belong to while viewing another room. |
-| Account | The private registration service associates a generated account identifier and unique login username with the player resolved from its guest credential. Registration stores an encoded password hash; deactivation requires that player's credential and password. Authenticated sessions and the browser integration remain planned. Account identifiers never replace historical player identifiers. |
+| Account | The private registration service associates a generated account identifier and unique login username with the player resolved from its guest credential. Registration stores an encoded password hash; deactivation requires that player's credential and password. Authenticated sessions are implemented in the private authentication API; browser integration remains pending. Account identifiers never replace historical player identifiers. |
 
 `User` is the existing immutable identifier-and-name value used for both profiles and historical participants. These roles do not require duplicate `Player` or `Participant` classes at this stage. A distinct actor type or internal service port will be introduced when an implemented use case needs its contract.
 
@@ -372,7 +411,7 @@ Run the Java checks that do not require Docker from the repository root:
 mvn test
 ```
 
-The Java suites contain 155 cases: 151 checks without Docker and four opt-in deployment checks. The latest run passed all 155 cases with no failures or skips. The 26 registration checks cover domain invariants, identity resolution, independent Argon2id salts and password verification, wrong-actor and wrong-password rejection, concurrent duplicate registration, atomic account-and-password writes, deactivation failures, additive schema migration and restart recovery. Seven of these cases exercise the registration API with a separate player HTTP server. The SQLite refactoring checks include continuing stored games while preserving distinct room and game identifiers, creation dates, historical participants and other rooms' histories. `GameHttpIntegrationTest` in `game-service` checks the API directly using separate game and player HTTP servers. Its 33 cases include the room, profile, session, JSON, concurrency, promotion, en passant, castling, result and restart checks from the former gateway suite, plus the two-room identity contract. Room and player repository contract tests run against SQLite and in-memory storage; storage tests cover rejected writes, invalid stored data and recovery. Docker checks in `chess-frontend` cover frontend hosting and HTTP forwarding, including the migrated markup, script and piece-asset checks. An unavailable game service produces `503` while the page remains accessible. To reproduce recovery, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
+The Java suites contain 172 cases: 168 checks without Docker and four opt-in deployment checks. The latest run passed all 172 cases with no failures or skips. Seventeen authentication checks cover independent clients, stable player identity, token handling, restart recovery, inactivity and absolute expiry, account deactivation, atomic failures and substitution of application ports. The 26 registration checks cover domain invariants, identity resolution, independent Argon2id salts and password verification, wrong-actor and wrong-password rejection, concurrent duplicate registration, atomic account-and-password writes, deactivation failures, additive schema migration and restart recovery. Seven of these cases exercise the registration API with a separate player HTTP server. The SQLite refactoring checks include continuing stored games while preserving distinct room and game identifiers, creation dates, historical participants and other rooms' histories. `GameHttpIntegrationTest` in `game-service` checks the API directly using separate game and player HTTP servers. Its 33 cases include the room, profile, session, JSON, concurrency, promotion, en passant, castling, result and restart checks from the former gateway suite, plus the two-room identity contract. Room and player repository contract tests run against SQLite and in-memory storage; storage tests cover rejected writes, invalid stored data and recovery. Docker checks in `chess-frontend` cover frontend hosting and HTTP forwarding, including the migrated markup, script and piece-asset checks. An unavailable game service produces `503` while the page remains accessible. To reproduce recovery, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 

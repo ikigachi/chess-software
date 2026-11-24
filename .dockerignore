@@ -10,6 +10,8 @@
 !player-service/src/**
 !register-service/
 !register-service/pom.xml
+!authentication-service/
+!authentication-service/pom.xml
 !game-service/
 !game-service/pom.xml
 !game-service/src/
