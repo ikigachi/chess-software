@@ -8,6 +8,7 @@ import com.google.gson.Strictness;
 import software.ulpgc.chess.application.domain.model.User;
 import software.ulpgc.chess.gameservice.application.ports.PlayerIdentity;
 import software.ulpgc.chess.gameservice.application.ports.PlayerProfileUpdater;
+import software.ulpgc.chess.gameservice.application.ports.AccountPlayerProfiles;
 
 import java.io.IOException;
 import java.net.URI;
@@ -18,7 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Set;
 
-public final class HttpPlayerService implements PlayerIdentity, PlayerProfileUpdater, AutoCloseable {
+public final class HttpPlayerService implements PlayerIdentity, PlayerProfileUpdater, AccountPlayerProfiles, AutoCloseable {
     private final URI service;
     private final HttpClient client;
     private final Gson gson = new GsonBuilder().setStrictness(Strictness.STRICT).create();
@@ -41,12 +42,27 @@ public final class HttpPlayerService implements PlayerIdentity, PlayerProfileUpd
     }
 
     private User sendPlayerServiceRequest(String path, String method, Object payload) {
+        return sendPlayerServiceRequest(path, method, payload, null);
+    }
+
+    @Override public User loadProfile(String token) {
+        return sendPlayerServiceRequest("/players/current", "GET", null, token);
+    }
+
+    @Override public User updateProfile(String token, String name) {
+        return sendPlayerServiceRequest("/players/current", "PUT", new AccountNameRequest(name), token);
+    }
+
+    private User sendPlayerServiceRequest(String path, String method, Object payload, String token) {
         var request = HttpRequest.newBuilder(service.resolve(path)).timeout(Duration.ofSeconds(4))
                 .header("Content-Type", "application/json")
-                .method(method, HttpRequest.BodyPublishers.ofString(gson.toJson(payload), StandardCharsets.UTF_8)).build();
+                .method(method, payload == null ? HttpRequest.BodyPublishers.noBody()
+                        : HttpRequest.BodyPublishers.ofString(gson.toJson(payload), StandardCharsets.UTF_8));
+        if (token != null) request.header("Authorization", "Bearer " + token);
         try {
-            var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            var response = client.send(request.build(), HttpResponse.BodyHandlers.ofInputStream());
             try (var input = response.body()) {
+                if (response.statusCode() == 401) throw new SecurityException("Invalid or expired account session.");
                 if (response.statusCode() != 200) throw new IOException("Player service returned an unsuccessful response.");
                 byte[] body = input.readNBytes(8193);
                 if (body.length > 8192) throw new IOException("Player service response is too large.");
@@ -73,4 +89,5 @@ public final class HttpPlayerService implements PlayerIdentity, PlayerProfileUpd
 
     private record ResolveRequest(String credential) {}
     private record UpdateNameRequest(String credential, String name) {}
+    private record AccountNameRequest(String name) {}
 }

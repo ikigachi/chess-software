@@ -295,6 +295,30 @@ mvn -pl authentication-service -am test
 
 `app.js` handles browser events, square selection and rendering. `RoomActions` can run with a service double and without browser elements. The backend validates every submitted move.
 
+### Account service clients in game-service
+
+`AccountAuthentication`, `AccountRegistration` and `AccountPlayerProfiles` define the outgoing account
+operations needed by the game application. Their results use immutable session values, stable player identifiers
+and the existing `User` model, with no HTTP or JSON types in the application ports.
+
+`HttpAccountServices` implements login, session validation and logout against the authentication origin, and
+registration, association lookup and authenticated deactivation against a separate registration origin.
+`HttpPlayerService` also implements account-profile reads and updates through `/players/current`.
+Session tokens travel in the Authorization header; deactivation sends only the password in its JSON body,
+and profile updates send only the requested name. Logout tolerates an already rejected session.
+
+The adapters validate response fields, account statuses and session dates, limit response bodies to 8192 bytes,
+and distinguish invalid input, rejected authentication, registration conflicts and unavailable services.
+Malformed or incomplete successful responses remain service failures. An unavailable lookup never implies
+that a player has no account, and failed logout requests never report success. The clients close their HTTP
+resources explicitly. They have no production Java dependency on registration or authentication modules.
+These clients are prepared independently; their connection to browser sessions and game permissions remains
+pending, and this change adds no public account routes or Docker services.
+
+Run `mvn -pl game-service -am test` to verify the clients and existing game behavior. Eight added HTTP checks
+cover separate service origins, request bodies and bearer headers, successful sessions and account operations,
+rejected credentials, registration conflicts, malformed responses and unavailable services.
+
 ## Communication contract
 
 The game service calls `POST /players/resolve` on the player-service origin with a JSON `credential` containing the browser's canonical UUID cookie value. The response contains `id` and the saved profile `name`, or `Guest` for an unnamed player. The identifier preserves the previous SHA-256 mapping, so existing players keep their seats after the extraction. Invalid credentials or JSON return `400`; unsupported methods, content types and oversized bodies return `405`, `415` and `413`. This remains guest identity resolution; the separate account authentication API is not yet connected to the board.
@@ -444,7 +468,7 @@ Run the Java checks that do not require Docker from the repository root:
 mvn test
 ```
 
-The Java suites contain 183 cases: 179 checks without Docker and four opt-in deployment checks. The account-deactivation and lookup commit was verified independently with all 179 non-Docker checks passing; the four Docker checks were skipped in that run. Five account-profile checks cover verified actor selection, rejected sessions and names, authentication failures and saved-name recovery. Seventeen authentication checks cover independent clients, stable player identity, token handling, restart recovery, inactivity and absolute expiry, account deactivation, atomic failures and substitution of application ports. The 32 registration checks cover domain invariants, identity resolution, independent Argon2id salts and password verification, wrong-actor and wrong-password rejection, concurrent duplicate registration, atomic account-and-password writes, deactivation failures, additive schema migration and restart recovery. Seven of these cases exercise the registration API with a separate player HTTP server. The SQLite refactoring checks include continuing stored games while preserving distinct room and game identifiers, creation dates, historical participants and other rooms' histories. `GameHttpIntegrationTest` in `game-service` checks the API directly using separate game and player HTTP servers. Its 33 cases include the room, profile, session, JSON, concurrency, promotion, en passant, castling, result and restart checks from the former gateway suite, plus the two-room identity contract. Room and player repository contract tests run against SQLite and in-memory storage; storage tests cover rejected writes, invalid stored data and recovery. Docker checks in `chess-frontend` cover frontend hosting and HTTP forwarding, including the migrated markup, script and piece-asset checks. An unavailable game service produces `503` while the page remains accessible. To reproduce recovery, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
+The Java suites contain 191 cases: 187 checks without Docker and four opt-in deployment checks. The account-client commit was verified independently with all 187 non-Docker checks passing; the four Docker checks were skipped in that run. Five account-profile checks cover verified actor selection, rejected sessions and names, authentication failures and saved-name recovery. Seventeen authentication checks cover independent clients, stable player identity, token handling, restart recovery, inactivity and absolute expiry, account deactivation, atomic failures and substitution of application ports. The 32 registration checks cover domain invariants, identity resolution, independent Argon2id salts and password verification, wrong-actor and wrong-password rejection, concurrent duplicate registration, atomic account-and-password writes, deactivation failures, additive schema migration and restart recovery. Seven of these cases exercise the registration API with a separate player HTTP server. The SQLite refactoring checks include continuing stored games while preserving distinct room and game identifiers, creation dates, historical participants and other rooms' histories. `GameHttpIntegrationTest` in `game-service` checks the API directly using separate game and player HTTP servers. Its 33 cases include the room, profile, session, JSON, concurrency, promotion, en passant, castling, result and restart checks from the former gateway suite, plus the two-room identity contract. Room and player repository contract tests run against SQLite and in-memory storage; storage tests cover rejected writes, invalid stored data and recovery. Docker checks in `chess-frontend` cover frontend hosting and HTTP forwarding, including the migrated markup, script and piece-asset checks. An unavailable game service produces `503` while the page remains accessible. To reproduce recovery, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 

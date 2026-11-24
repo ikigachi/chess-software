@@ -2,6 +2,7 @@ package software.ulpgc.chess.gameservice;
 
 import io.javalin.Javalin;
 import org.junit.jupiter.api.Test;
+import software.ulpgc.chess.application.domain.model.User;
 import software.ulpgc.chess.gameservice.infrastructure.adapters.HttpPlayerService;
 
 import java.net.URI;
@@ -12,6 +13,56 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
 class HttpPlayerServiceTest {
+    @Test void accountProfilesUseBearerAuthorizationAndSendOnlyTheRequestedName() {
+        String token = "a".repeat(43);
+        AtomicReference<String> authorization = new AtomicReference<>();
+        AtomicReference<String> requestBody = new AtomicReference<>();
+        var service = Javalin.create(config -> {
+            config.routes.get("/players/current", context -> {
+                authorization.set(context.header("Authorization"));
+                requestBody.set(context.body());
+                context.contentType("application/json").result("{\"id\":\"player\",\"name\":\"Alice\"}");
+            });
+            config.routes.put("/players/current", context -> {
+                authorization.set(context.header("Authorization"));
+                requestBody.set(context.body());
+                context.contentType("application/json").result("{\"id\":\"player\",\"name\":\"Renamed\"}");
+            });
+        }).start("127.0.0.1", 0);
+        try (var players = new HttpPlayerService(URI.create("http://127.0.0.1:" + service.port()))) {
+            assertEquals(new User("player", "Alice"), players.loadProfile(token));
+            assertEquals("Bearer " + token, authorization.get());
+            assertEquals("", requestBody.get());
+            assertEquals(new User("player", "Renamed"), players.updateProfile(token, "Renamed"));
+            assertEquals("Bearer " + token, authorization.get());
+            assertEquals("{\"name\":\"Renamed\"}", requestBody.get());
+        } finally { service.stop(); }
+    }
+
+    @Test void rejectedAndMalformedAccountProfilesNeverReturnAPlayer() {
+        AtomicInteger status = new AtomicInteger(401);
+        AtomicReference<String> body = new AtomicReference<>("{}");
+        var service = Javalin.create(config -> {
+            config.routes.get("/players/current", context ->
+                    context.status(status.get()).contentType("application/json").result(body.get()));
+            config.routes.put("/players/current", context ->
+                    context.status(status.get()).contentType("application/json").result(body.get()));
+        }).start("127.0.0.1", 0);
+        try (var players = new HttpPlayerService(URI.create("http://127.0.0.1:" + service.port()))) {
+            assertThrows(SecurityException.class, () -> players.loadProfile("expired"));
+            assertThrows(SecurityException.class, () -> players.updateProfile("expired", "Renamed"));
+            status.set(200);
+            for (String invalid : List.of("null", "{}", "{\"id\":\"\",\"name\":\"Alice\"}", "x".repeat(8193))) {
+                body.set(invalid);
+                assertThrows(IllegalStateException.class, () -> players.loadProfile("token"));
+                assertThrows(IllegalStateException.class, () -> players.updateProfile("token", "Renamed"));
+            }
+            service.stop();
+            assertThrows(IllegalStateException.class, () -> players.loadProfile("token"));
+            assertThrows(IllegalStateException.class, () -> players.updateProfile("token", "Renamed"));
+        } finally { service.stop(); }
+    }
+
     @Test void rejectsUnsuccessfulMalformedIncompleteAndOversizedServiceResponses() {
         AtomicInteger status = new AtomicInteger(200);
         AtomicReference<String> body = new AtomicReference<>();
