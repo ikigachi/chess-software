@@ -5,6 +5,7 @@ import software.ulpgc.chess.registerservice.application.domain.model.AccountConf
 import software.ulpgc.chess.registerservice.application.ports.AccountRepository;
 import software.ulpgc.chess.registerservice.application.ports.PasswordHasher;
 import software.ulpgc.chess.registerservice.application.ports.PlayerIdentity;
+import software.ulpgc.chess.registerservice.application.ports.AccountIdentity;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -13,11 +14,26 @@ public final class AccountUseCases {
     private final AccountRepository accounts;
     private final PlayerIdentity identities;
     private final PasswordHasher passwords;
+    private final AccountIdentity authentication;
 
     public AccountUseCases(AccountRepository accounts, PlayerIdentity identities, PasswordHasher passwords) {
+        this(accounts, identities, passwords, token -> { throw new SecurityException("Account sessions are not configured."); });
+    }
+
+    public AccountUseCases(AccountRepository accounts, PlayerIdentity identities, PasswordHasher passwords, AccountIdentity authentication) {
         this.accounts = Objects.requireNonNull(accounts);
         this.identities = Objects.requireNonNull(identities);
         this.passwords = Objects.requireNonNull(passwords);
+        this.authentication = Objects.requireNonNull(authentication);
+    }
+
+    public boolean hasAccount(String playerId) {
+        return accounts.findByPlayerId(playerId).isPresent();
+    }
+
+    public Account deactivateAuthenticatedAccount(String token, String password) {
+        validatePassword(password);
+        return deactivatePlayerAccount(authentication.resolvePlayerId(token), password);
     }
 
     public Account registerAccount(String credential, String username, String password) {
@@ -34,6 +50,10 @@ public final class AccountUseCases {
     public Account deactivateAccount(String credential, String password) {
         validatePassword(password);
         String playerId = identities.resolvePlayerId(credential);
+        return deactivatePlayerAccount(playerId, password);
+    }
+
+    private Account deactivatePlayerAccount(String playerId, String password) {
         Account account = accounts.findByPlayerId(playerId).filter(Account::isActive)
                 .orElseThrow(() -> new SecurityException("Account credentials are invalid."));
         String passwordHash = accounts.findPasswordHash(account.id())

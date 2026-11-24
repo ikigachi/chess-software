@@ -31,9 +31,19 @@ public final class AccountApiHandler {
     public void deactivateAccount(Context context) throws IOException {
         JsonObject request = readJsonRequest(context);
         if (request == null) return;
-        Account account = accounts.deactivateAccount(readOptionalString(request, "credential"),
-                readOptionalString(request, "password"));
+        String authorization = context.header("Authorization");
+        Account account;
+        if (authorization == null) {
+            account = accounts.deactivateAccount(readOptionalString(request, "credential"), readOptionalString(request, "password"));
+        } else {
+            if (!authorization.startsWith("Bearer ")) throw new SecurityException("Account session is required.");
+            account = accounts.deactivateAuthenticatedAccount(authorization.substring(7), readOptionalString(request, "password"));
+        }
         sendAccountResponse(context, 200, account);
+    }
+
+    public void lookupPlayerAccount(Context context) {
+        sendJsonResponse(context, 200, new RegistrationView(accounts.hasAccount(context.pathParam("playerId"))));
     }
 
     private JsonObject readJsonRequest(Context context) throws IOException {
@@ -78,4 +88,5 @@ public final class AccountApiHandler {
 
     private record AccountView(String id, String username, String playerId, String status) {}
     private record ErrorView(String message) {}
+    private record RegistrationView(boolean registered) {}
 }

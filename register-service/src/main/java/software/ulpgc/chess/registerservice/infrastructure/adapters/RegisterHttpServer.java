@@ -20,6 +20,7 @@ public final class RegisterHttpServer implements AutoCloseable {
             config.http.prefer405over404 = true;
             config.router.ignoreTrailingSlashes = false;
             config.routes.post("/accounts", accounts::registerAccount);
+            config.routes.get("/accounts/by-player/{playerId}", accounts::lookupPlayerAccount);
             config.routes.delete("/accounts/current", accounts::deactivateAccount);
             config.routes.exception(AccountConflictException.class, (exception, context) ->
                     accounts.sendErrorResponse(context, 409, exception.getMessage()));
@@ -34,7 +35,8 @@ public final class RegisterHttpServer implements AutoCloseable {
             config.routes.exception(NotFoundResponse.class, (exception, context) ->
                     accounts.sendErrorResponse(context, 404, "Not found"));
             config.routes.exception(MethodNotAllowedResponse.class, (exception, context) -> {
-                context.header("Allow", context.path().equals("/accounts") ? "POST" : "DELETE");
+                context.header("Allow", context.path().equals("/accounts") ? "POST"
+                        : context.path().startsWith("/accounts/by-player/") ? "GET" : "DELETE");
                 accounts.sendErrorResponse(context, 405, "Method not allowed");
             });
             config.routes.exception(Exception.class, (exception, context) ->
