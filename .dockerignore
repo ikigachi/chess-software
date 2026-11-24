@@ -22,3 +22,5 @@
 !game-service/src/**
 !chess-frontend/
 !chess-frontend/pom.xml
+!matches-service/
+!matches-service/pom.xml

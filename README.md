@@ -9,7 +9,7 @@ Build a chess application where two users connect through a shared room code, pl
 | Dependency | Version or use |
 | --- | --- |
 | JDK | 27 |
-| Maven | Builds the six modules and resolves dependencies |
+| Maven | Builds the seven modules and resolves dependencies |
 | Gson | 2.14.0, backend JSON serialization |
 | Javalin | 7.2.4, HTTP servers |
 | SLF4J Simple | 2.0.20, server logging |
@@ -132,6 +132,15 @@ docker compose down
 │       │   └── infrastructure/adapters/
 │       ├── main/resources/authentication-schema.sql
 │       └── test/java/software/ulpgc/chess/authenticationservice/
+├── matches-service/
+│   ├── pom.xml
+│   └── src/
+│       ├── main/java/software/ulpgc/chess/matchesservice/
+│       │   ├── Main.java
+│       │   ├── application/ports/GameReader.java
+│       │   ├── application/usecases/GetMatchUseCase.java
+│       │   └── infrastructure/adapters/
+│       └── test/java/software/ulpgc/chess/matchesservice/
 ├── chess-frontend/
 │   ├── pom.xml
 │   └── src/
@@ -158,6 +167,7 @@ docker compose down
 flowchart LR
     F["Frontend in browser"] -->|"HTTP"| W["NGINX in Docker: port 8080"]
     W -->|"HTTP proxy"| G["Game service: port 8081"]
+    M["Matches service: direct Java port 8085"] -->|"GameReader via HTTP, read-only"| G
     G -->|"PlayerIdentity via HTTP/JSON"| P["Player service: port 8082"]
     G -->|"RoomRepository via JDBC"| D["Rooms SQLite database"]
     P -->|"PlayerRepository via JDBC"| PD["Players SQLite database"]
@@ -172,11 +182,11 @@ flowchart LR
 
 The browser uses one web origin served by NGINX. The game and player services run in separate Java processes using Javalin, with one container per service in Compose. When opening a session, the game service obtains its guest-player identity through the `PlayerIdentity` port and its HTTP adapter. The game service persists rooms in SQLite and manages active browser sessions in memory. The player service persists profile identifiers and names in a separate SQLite file and volume. Browser cookies let the original players reopen a saved room with its code after restarting the services.
 
-Player identity resolution and profile-name operations remain separate from room coordination. Game-service now verifies account sessions before protected operations and permits guest access only while that player has no account. Existing HTML and JavaScript continue to support unregistered guests. Account controls are connected; matches-service extraction remains pending.
+Player identity resolution and profile-name operations remain separate from room coordination. Game-service now verifies account sessions before protected operations and permits guest access only while that player has no account. Existing HTML and JavaScript continue to support unregistered guests. Account controls are connected. A separate matches-service supports read-only queries; moving coordination writes remains pending.
 
 ### Planned service boundaries
 
-This table records the responsibility split. Player, game, registration and authentication processes are implemented and deployed through Compose. Backend account permissions and frontend account controls are connected; matches extraction remains pending.
+This table records the responsibility split. Player, game, registration and authentication processes are implemented and deployed through Compose. Backend account permissions and frontend account controls are connected. The matches-service read query has its own Java entry point; room coordination writes and its Docker/frontend connection remain pending.
 
 | Component | Responsibility and data ownership |
 | --- | --- |
@@ -214,6 +224,49 @@ Game-service package paths are relative to `software/ulpgc/chess/gameservice`. I
 Room coordination and chess operations remain separate use cases. Within SQLite, `SqliteRoomRepository` handles room identifiers, participant snapshots and the game reference, while `SqliteGameHistory` handles move order, promotion values and replay. The history component receives the repository's connection and does not open connections or commit independently. Both reads share one transaction so room metadata and moves describe the same stored version; both writes share one transaction so a rejected history write also rolls back the room. This internal separation keeps the existing schema and data and prepares later extraction without introducing another public repository contract.
 
 `GameHttpServer` declares the Javalin routes, including `get("/games/{id}", ...)` and `post("/games", ...)`. Its handlers adapt the Javalin `Context` to the existing use cases. Room operations execute one at a time to preserve consistent updates. This follows the framework used in the classroom example.
+
+### Read-only match queries
+
+`matches-service` is a separate Java application for querying a recorded encounter by room code. Its
+`GetMatchUseCase` depends on the `GameReader` application port. `HttpGameReader` implements that port by
+calling the existing `GET /games/{code}` endpoint and translating its response into the shared `Room`,
+`Game`, `User` and `Move` model. It reconstructs the game with `Game.replay()` rather than introducing
+another chess model. The query does not authorize moves, allocate seats, open a database or keep a cache.
+The current room-and-move transaction remains owned by game-service.
+
+Run `software.ulpgc.chess.matchesservice.Main` in IntelliJ with JDK 27. Its defaults are port `8085`, game
+origin `http://127.0.0.1:8081` and bind address `127.0.0.1`. Optional arguments follow this order:
+`8095 http://127.0.0.1:8091 127.0.0.1`. With the existing Compose deployment, use
+`8085 http://127.0.0.1:8080` to query games through NGINX without exposing the game-service container.
+The HTTP client and server close explicitly when the process stops.
+
+`GET http://127.0.0.1:8085/matches/ABC123` returns `code`, `gameId`, historical `white` and `black`, `turn`,
+`inCheck`, `winner`, `stalemate` and `moveCount`. A waiting match has a null Black participant and no moves.
+The room code is normalized as for joining a room; the game identifier is preserved and can differ from
+that code. The current source endpoint is selected by room code, so the returned game identifier must not
+be substituted for it when constructing the existing `/games/{code}` URL.
+
+A missing encounter returns `404`; invalid codes return `400`; unsupported writes return `405` with
+`Allow: GET`. An unavailable, malformed, oversized or inconsistent game response returns `503`, never an
+apparently absent match. The HTTP response limit is 1 MiB, with a two-second connection timeout and a
+four-second request timeout covering the complete response. Queries return JSON and `Cache-Control: no-store`
+and issue no session cookies. They retain the current policy permitting reads to anyone who knows the code;
+no browser cookie or account credential is forwarded to the game source.
+
+Compose still runs five containers. It does not run matches-service, and NGINX and the frontend do not use
+`/matches` yet. The new module POM is included in the Docker build context only so Maven can read the reactor;
+the existing runtime images do not include this service. Match creation, joining, persistent coordination,
+creation-date queries and the historical match listing remain later steps.
+
+Verify the query and its source modules with:
+
+```bash
+mvn -pl matches-service -am test
+```
+
+Thirteen new checks cover port substitution, code normalization, missing encounters, source failures,
+malformed data, distinct identifiers, promotion reconstruction, a stalled response body, waiting games,
+write rejection, SQLite read-only behavior, recovery and the Main running in an independent Java process.
 
 ### Account registration and storage
 
@@ -370,7 +423,7 @@ The server rejects moves that leave the moving player's king in check or attempt
 
 ### Room, game and identity contracts
 
-These contracts describe the current application and the constraints for separating matches from games. Matches-service remains planned. Registration, authentication, the public backend account adapter and the HTML account controls are implemented.
+These contracts describe the current application and the constraints for separating matches from games. Matches-service supports read-only queries; its room coordination writes remain planned. Registration, authentication, the public backend account adapter and the HTML account controls are implemented.
 
 | Concept | Identity and guarantees |
 | --- | --- |
@@ -462,7 +515,7 @@ Run the Java checks that do not require Docker from the repository root:
 mvn test
 ```
 
-The Java suites contain 200 cases: 195 without Docker and five opt-in deployment checks. The new coverage includes eight public account-permission HTTP scenarios against the four independent services and a malformed account-response adapter check. They cover registration, cookie and CSRF handling, historical identity and names, login in another browser, restart recovery, logout with a missing account cookie, expiry, deactivation, legacy-route bypass attempts, failed dependencies and rejected writes. The five Docker checks cover frontend assets, proxy contracts, guest recovery, service failures and account login/profile/history recovery after recreating account and game containers. The existing 33 direct game API cases, 32 registration cases, 17 authentication cases, chess rules and repository contracts remain in the suite.
+The Java suites contain 213 cases: 208 without Docker and five opt-in deployment checks. The new coverage includes eight public account-permission HTTP scenarios against the four independent services and a malformed account-response adapter check. They cover registration, cookie and CSRF handling, historical identity and names, login in another browser, restart recovery, logout with a missing account cookie, expiry, deactivation, legacy-route bypass attempts, failed dependencies and rejected writes. The five Docker checks cover frontend assets, proxy contracts, guest recovery, service failures and account login/profile/history recovery after recreating account and game containers. The existing 33 direct game API cases, 32 registration cases, 17 authentication cases, chess rules and repository contracts remain in the suite.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 

@@ -8,7 +8,7 @@ Este documento se escribe en español por petición expresa del usuario. El cód
 
 ## 1. Punto de partida comprobado
 
-Los tres primeros commits del bloque 5.4a están subidos: `d4671cf` para perfiles autenticados, `a12bcf2` para bajas y consultas de asociación y `4db73c5` para los clientes de cuentas. El cuarto commit, `c6b76bf`, completa la conexión de permisos y está subido: game-service ofrece el adaptador público de cuentas, verifica la identidad para salas, movimientos y perfiles y bloquea las credenciales antiguas de invitados que ya tienen cuenta. Registro y autenticación están conectados en Compose con su base compartida. La verificación contiene 200 pruebas: 195 sin Docker y cinco de despliegue. Los controles de cuenta del 5.4b quedan completados en esta entrega, verificados con 13 pruebas JavaScript, cinco comprobaciones Docker del frontend y un recorrido real del navegador.
+Los tres primeros commits del bloque 5.4a están subidos: `d4671cf` para perfiles autenticados, `a12bcf2` para bajas y consultas de asociación y `4db73c5` para los clientes de cuentas. El cuarto commit, `c6b76bf`, completa la conexión de permisos y está subido: game-service ofrece el adaptador público de cuentas, verifica la identidad para salas, movimientos y perfiles y bloquea las credenciales antiguas de invitados que ya tienen cuenta. Registro y autenticación están conectados en Compose con su base compartida. Los controles de cuenta del 5.4b están subidos en `209357b`, verificados con 13 pruebas JavaScript y un recorrido real del navegador. Esta entrega completa el paso 6.1 con el commit `Add match queries through application ports`: matches-service consulta encuentros por código mediante GameReader y un adaptador HTTP hacia game-service; no tiene almacenamiento propio ni rutas de escritura. La suite Java contiene 213 pruebas: 208 sin Docker y cinco de despliegue.
 
 | Elemento | Situación actual |
 | --- | --- |
@@ -23,7 +23,7 @@ Los tres primeros commits del bloque 5.4a están subidos: `d4671cf` para perfile
 | Historial | Movimientos persistentes y consulta de partida por código; todavía no hay una pantalla de listado de encuentros anteriores |
 | `register-service` | Altas, bajas y consulta privada de asociación; ejecutado en Compose y utilizado por el adaptador público de game-service |
 | `authentication-service` | Login, consulta y logout; ejecutado en Compose y utilizado para validar las operaciones de jugadores con cuenta |
-| Otros servicios | `matches-service` todavía no está implementado |
+| `matches-service` | Consulta de solo lectura en un Main independiente, puerto 8085; sin base propia, sin escrituras y todavía fuera de Compose y del frontend |
 | ActiveMQ | No está incorporado ni se ha confirmado como requisito obligatorio |
 
 Ya funcionan la creación y unión a salas, los turnos, la sincronización por consultas periódicas, los avisos de desconexión, la recuperación de partidas y la conservación de participantes históricos tras cambiar un perfil.
@@ -175,7 +175,7 @@ El contrato debe establecer quién conserva los asientos, cómo conoce `game-ser
 
 ### Fase 5. Registro y autenticación
 
-**Estado:** pasos 5.1 y 5.2 guardados en `877f733` y `424e30e`; paso 5.3 subido en `e4546f5`. El bloque 5.4a está subido en cuatro commits revisables, terminado en `c6b76bf`. Esta entrega completa el bloque 5.4b con el commit `Connect account controls to the frontend`. Incluye el adaptador público, los permisos de cuentas en salas y perfiles y el despliegue de los cuatro servicios Java por NGINX. Se adelantó este despliegue para que el servidor pudiera verificar las cuentas sin un modo alternativo que ignorase los servicios de seguridad. La pestaña Account ofrece registro, login, logout y baja, y recupera la sesión antes de cargar el tablero.
+**Estado:** pasos 5.1 y 5.2 guardados en `877f733` y `424e30e`; paso 5.3 subido en `e4546f5`. El bloque 5.4a está subido en cuatro commits revisables, terminado en `c6b76bf`. El bloque 5.4b está subido en `209357b`, `Connect account controls to the frontend`. Incluye el adaptador público, los permisos de cuentas en salas y perfiles y el despliegue de los cuatro servicios Java por NGINX. Se adelantó este despliegue para que el servidor pudiera verificar las cuentas sin un modo alternativo que ignorase los servicios de seguridad. La pestaña Account ofrece registro, login, logout y baja, y recupera la sesión antes de cargar el tablero.
 
 Autenticación se ejecuta en el puerto 8084 y exige que registro haya inicializado .regalia/accounts.sqlite. Abre el archivo sin crearlo y añade solo authentication_sessions mediante authentication-schema.sql. Lee cuentas y contraseñas sin depender de las clases Java de register-service en producción: AccountCredentials es una proyección privada de lectura, no otra entidad Account ni otro perfil. Registro conserva las escrituras de cuentas, hashes y estado; autenticación solo escribe sesiones.
 
@@ -197,7 +197,7 @@ El paso 5.4 se divide en dos bloques revisables:
 | Bloque | Trabajo y situación | Posible commit |
 | --- | --- | --- |
 | 5.4a | Adaptador público, cookies y CSRF, permisos de juego y perfiles y despliegue de los servicios de cuentas; subido en cuatro commits | `Connect authenticated sessions to game permissions` |
-| 5.4b | Controles de cuenta y recuperación de sesión en la interfaz; completados y verificados en esta entrega | `Connect account controls to the frontend` |
+| 5.4b | Controles de cuenta y recuperación de sesión en la interfaz; subidos en `209357b` | `Connect account controls to the frontend` |
 
 Las pruebas del 5.4a verifican cuatro servicios HTTP separados y cinco contenedores temporales. Cubren registro sin aceptar actores declarados, cookies y tokens rotados, errores sin sobrescribir la sesión, inicio desde otro navegador, conservación de perfiles y nombres históricos, recuperación tras reiniciar, logout aunque falte la cookie de cuenta, caducidad, baja y rechazo de rutas antiguas con la credencial del invitado registrado. El volumen compartido de cuentas mantiene el mismo UID y cada servicio sigue escribiendo solamente sus tablas. Authentication-service puede reiniciarse durante el primer arranque hasta que registro haya inicializado el esquema; no se presenta esto como una comprobación de salud de kata 5.
 
@@ -222,6 +222,8 @@ Las API internas de registro, autenticación y perfiles autenticados siguen sin 
 **Cierre:** altas duplicadas y credenciales inválidas se rechazan; el cierre y la baja invalidan el acceso; otro navegador recupera la identidad correcta; el historial anterior permanece consultable según la política de acceso acordada.
 
 ### Fase 6. Extraer `matches-service`
+
+**Estado:** 6.1 completado y verificado en esta entrega. GET /matches/{code} consulta los participantes históricos y el resumen de la partida mediante GameReader, sin duplicar almacenamiento ni escrituras. El Main usa el puerto 8085 y puede consultar el game-service directo o a través del NGINX actual. Las fechas y el listado por jugador siguen en fases posteriores; creación y unión continúan en game-service.
 
 **Objetivo:** que la coordinación de encuentros se ejecute en su servicio y que `game-service` conserve las reglas y los movimientos autoritativos.
 
@@ -333,7 +335,7 @@ El plan se actualizará si cambia el enunciado o una comprobación revela otra d
 
 ## 8. Siguiente acción concreta
 
-El bloque 5.4a está subido hasta `c6b76bf`. El 5.4b se completa en esta entrega con el commit **`Connect account controls to the frontend`**. Se han comprobado registro, login, contraseña incorrecta, logout, perfil, dos movimientos entre cuenta e invitado, recuperación del mismo jugador desde otro contexto de cookies y baja que bloquea la otra sesión conservando tablero e historial visibles. También se han probado la caída y recuperación de autenticación y la presentación en móvil. El siguiente desarrollo es **6.1: consultas de encuentros mediante puertos**, con el nombre propuesto **`Add match queries through application ports`**. Antes de extraer escrituras, se concretará el contrato de consultas sin duplicar movimientos ni romper la transacción actual. Consul y réplicas siguen pendientes en 3.4 a 3.7 y las rutas antiguas, en 6.4.
+Los pasos 5.4a y 5.4b están subidos hasta `209357b`. El paso 6.1 se completa en esta entrega con el commit **`Add match queries through application ports`**. Se han verificado la lectura por código, los datos históricos, la distinción entre código e identificador de partida, los fallos externos, el límite de respuesta y el timeout del cuerpo completo. Una prueba arranca el Main en otro proceso Java y las consultas con disparadores SQLite que rechazan escrituras conservan sala y movimientos. Compose y el frontend todavía no utilizan el nuevo servicio. El siguiente desarrollo es **6.2**, dividido primero en un contrato pequeño de creación recuperable con clave estable de operación; la creación y la unión no deben trasladarse juntas en un único cambio grande. La implementación se comprobará antes de conectar escrituras entre servicios. Consul y réplicas siguen pendientes en 3.4 a 3.7 y las rutas antiguas, en 6.4.
 
 La creación de este documento no implementa estas fases ni crea un commit.
 

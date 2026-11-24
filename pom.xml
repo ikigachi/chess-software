@@ -15,6 +15,7 @@
         <module>register-service</module>
         <module>authentication-service</module>
         <module>game-service</module>
+        <module>matches-service</module>
         <module>chess-frontend</module>
     </modules>
 
