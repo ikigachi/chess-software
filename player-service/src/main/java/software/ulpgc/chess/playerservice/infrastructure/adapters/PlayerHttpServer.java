@@ -20,6 +20,10 @@ public final class PlayerHttpServer implements AutoCloseable {
             config.router.ignoreTrailingSlashes = false;
             config.routes.post("/players/resolve", players::resolvePlayer);
             config.routes.put("/players/name", players::renamePlayer);
+            config.routes.get("/players/current", players::loadAccountProfile);
+            config.routes.put("/players/current", players::updateAccountProfile);
+            config.routes.exception(SecurityException.class, (exception, context) ->
+                    players.sendErrorResponse(context, 401, "Invalid or expired account session."));
             config.routes.exception(JsonParseException.class, (exception, context) ->
                     players.sendErrorResponse(context, 400, "Invalid JSON request."));
             config.routes.exception(IllegalArgumentException.class, (exception, context) ->
@@ -29,7 +33,8 @@ public final class PlayerHttpServer implements AutoCloseable {
             config.routes.exception(NotFoundResponse.class, (exception, context) ->
                     players.sendErrorResponse(context, 404, "Not found"));
             config.routes.exception(MethodNotAllowedResponse.class, (exception, context) -> {
-                context.header("Allow", context.path().equals("/players/name") ? "PUT" : "POST");
+                context.header("Allow", context.path().equals("/players/current") ? "GET, PUT"
+                        : context.path().equals("/players/name") ? "PUT" : "POST");
                 players.sendErrorResponse(context, 405, "Method not allowed");
             });
             config.routes.exception(Exception.class, (exception, context) ->

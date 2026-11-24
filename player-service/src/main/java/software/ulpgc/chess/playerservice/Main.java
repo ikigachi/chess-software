@@ -7,8 +7,11 @@ import software.ulpgc.chess.playerservice.infrastructure.adapters.SqlitePlayerDa
 import software.ulpgc.chess.playerservice.infrastructure.adapters.SqlitePlayerRepository;
 import software.ulpgc.chess.playerservice.infrastructure.adapters.PlayerApiHandler;
 import software.ulpgc.chess.playerservice.infrastructure.adapters.PlayerHttpServer;
+import software.ulpgc.chess.playerservice.infrastructure.adapters.HttpAccountIdentity;
+import software.ulpgc.chess.playerservice.application.usecases.AccountProfileUseCases;
 
 import java.nio.file.Path;
+import java.net.URI;
 
 public class Main {
     public static void main(String[] args) {
@@ -17,9 +20,17 @@ public class Main {
         database.initializeSchema();
         PlayerRepository repository = new SqlitePlayerRepository(database);
         ResolvePlayerUseCase resolve = new ResolvePlayerUseCase(repository);
-        PlayerHttpServer server = new PlayerHttpServer(port, new PlayerApiHandler(resolve, new RenamePlayerUseCase(resolve, repository)));
-        Runtime.getRuntime().addShutdownHook(new Thread(server::close));
-        server.start(args.length > 2 ? args[2] : "127.0.0.1");
+        var accounts = new HttpAccountIdentity(URI.create(args.length > 3 ? args[3] : "http://127.0.0.1:8084"));
+        PlayerHttpServer server = new PlayerHttpServer(port, new PlayerApiHandler(resolve, new RenamePlayerUseCase(resolve, repository),
+                new AccountProfileUseCases(repository, accounts)));
+        try {
+            server.start(args.length > 2 ? args[2] : "127.0.0.1");
+        } catch (RuntimeException exception) {
+            server.close();
+            accounts.close();
+            throw exception;
+        }
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> { server.close(); accounts.close(); }));
         System.out.println("Player service: " + server.uri());
     }
 }

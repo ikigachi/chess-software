@@ -8,6 +8,7 @@ import io.javalin.http.Context;
 import software.ulpgc.chess.application.domain.model.User;
 import software.ulpgc.chess.playerservice.application.usecases.ResolvePlayerUseCase;
 import software.ulpgc.chess.playerservice.application.usecases.RenamePlayerUseCase;
+import software.ulpgc.chess.playerservice.application.usecases.AccountProfileUseCases;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -16,11 +17,37 @@ import java.util.Objects;
 public final class PlayerApiHandler {
     private final ResolvePlayerUseCase resolve;
     private final RenamePlayerUseCase rename;
+    private final AccountProfileUseCases accounts;
     private final Gson gson = new GsonBuilder().setStrictness(Strictness.STRICT).create();
 
     public PlayerApiHandler(ResolvePlayerUseCase resolve, RenamePlayerUseCase rename) {
+        this(resolve, rename, null);
+    }
+
+    public PlayerApiHandler(ResolvePlayerUseCase resolve, RenamePlayerUseCase rename, AccountProfileUseCases accounts) {
         this.resolve = Objects.requireNonNull(resolve);
         this.rename = Objects.requireNonNull(rename);
+        this.accounts = accounts;
+    }
+
+    public void loadAccountProfile(Context context) {
+        if (accounts == null) throw new SecurityException("Account profile access is not configured.");
+        User user = accounts.loadProfile(readAccountToken(context));
+        sendJsonResponse(context, 200, new PlayerView(user.id(), user.name()));
+    }
+
+    public void updateAccountProfile(Context context) throws IOException {
+        if (accounts == null) throw new SecurityException("Account profile access is not configured.");
+        JsonObject request = readJsonRequest(context);
+        if (request == null) return;
+        User user = accounts.updateProfile(readAccountToken(context), readOptionalString(request, "name"));
+        sendJsonResponse(context, 200, new PlayerView(user.id(), user.name()));
+    }
+
+    private String readAccountToken(Context context) {
+        String header = context.header("Authorization");
+        if (header == null || !header.startsWith("Bearer ")) throw new SecurityException("Account session is required.");
+        return header.substring(7);
     }
 
     public void resolvePlayer(Context context) throws IOException {
