@@ -493,10 +493,10 @@ h1 {
   outline:2px solid var(--gold);
   outline-offset:-3px
 }
-#tab-moves:checked~.panel-tabs label[for=tab-moves],#tab-room:checked~.panel-tabs label[for=tab-room],#tab-guide:checked~.panel-tabs label[for=tab-guide] {
+#tab-moves:checked~.panel-tabs label[for=tab-moves],#tab-room:checked~.panel-tabs label[for=tab-room],#tab-guide:checked~.panel-tabs label[for=tab-guide],#tab-account:checked~.panel-tabs label[for=tab-account] {
   background:#fcf9f1
 }
-#tab-moves:checked~.panel-tabs label[for=tab-moves]:after,#tab-room:checked~.panel-tabs label[for=tab-room]:after,#tab-guide:checked~.panel-tabs label[for=tab-guide]:after {
+#tab-moves:checked~.panel-tabs label[for=tab-moves]:after,#tab-room:checked~.panel-tabs label[for=tab-room]:after,#tab-guide:checked~.panel-tabs label[for=tab-guide]:after,#tab-account:checked~.panel-tabs label[for=tab-account]:after {
   content:'';
   position:absolute;
   bottom:0;
@@ -508,7 +508,7 @@ h1 {
 .tab-content {
   display:none
 }
-#tab-moves:checked~.moves-panel,#tab-room:checked~.room-panel,#tab-guide:checked~.guide-panel {
+#tab-moves:checked~.moves-panel,#tab-room:checked~.room-panel,#tab-guide:checked~.guide-panel,#tab-account:checked~.account-panel {
   display:block
 }
 .panel-title {
@@ -642,7 +642,7 @@ h1 {
 .room-form,.profile-form {
   padding:24px 22px 13px
 }
-.room-form label,.profile-form label {
+.room-form label,.profile-form label,.account-form label {
   display:block;
   font:9px var(--sans);
   letter-spacing:1px;
@@ -650,7 +650,7 @@ h1 {
   color:#8b785b;
   margin-bottom:9px
 }
-.room-form input,.profile-form input {
+.room-form input,.profile-form input,.account-form input:not([type=checkbox]) {
   display:block;
   width:100%;
   padding:12px 11px;
@@ -676,6 +676,52 @@ h1 {
 }
 .profile-form p.error {
   color:#865c43
+}
+.account-content {
+  padding:22px;
+  max-width:494px;
+  margin:auto
+}
+#account-status {
+  line-height:1.7;
+  font-size:13px;
+  overflow-wrap:anywhere
+}
+#account-status.error {
+  color:#865c43
+}
+.account-form .button,#account-exit .button {
+  margin-top:12px
+}
+.account-form [hidden] {
+  display:none
+}
+.account-help {
+  font-size:11px;
+  line-height:1.7;
+  color:var(--muted)
+}
+#deactivation-area {
+  margin:22px 0;
+  border-top:1px solid var(--line);
+  padding-top:18px
+}
+#deactivation-area summary {
+  cursor:pointer;
+  font-size:13px;
+  color:#865c43
+}
+.account-form .account-confirmation {
+  display:flex;
+  gap:9px;
+  align-items:flex-start;
+  text-transform:none;
+  letter-spacing:0;
+  font:12px/1.6 var(--sans)
+}
+.account-confirmation input {
+  margin:3px 0 0;
+  accent-color:var(--gold)
 }
 .room-form input[name=code] {
   text-transform:uppercase;

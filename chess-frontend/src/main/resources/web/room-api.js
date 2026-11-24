@@ -1,6 +1,48 @@
 export class RoomApi {
   #token;
 
+  async loadAccountSession() {
+    return this.#requestAccountSession('/api/session');
+  }
+
+  async registerAccount(username, password) {
+    return this.#writeAccount('/api/accounts', 'POST', { username, password });
+  }
+
+  async login(username, password) {
+    return this.#writeAccount('/api/session', 'POST', { username, password });
+  }
+
+  async logout() {
+    return this.#writeAccount('/api/session', 'DELETE');
+  }
+
+  async deactivateAccount(password) {
+    return this.#writeAccount('/api/accounts/current', 'DELETE', { password });
+  }
+
+  async #writeAccount(path, method, fields = {}) {
+    if (!this.#token) await this.loadAccountSession();
+    return this.#requestAccountSession(path, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...fields, token: this.#token })
+    });
+  }
+
+  async #requestAccountSession(path, options) {
+    const session = await this.#request(path, options);
+    const validViewer = session.viewer === null || (typeof session.viewer?.id === 'string' && session.viewer.id &&
+      typeof session.viewer?.name === 'string' && session.viewer.name.trim());
+    if (typeof session.authenticated !== 'boolean' || typeof session.requiresLogin !== 'boolean' ||
+        typeof session.token !== 'string' || !session.token || !validViewer ||
+        (session.authenticated && (session.requiresLogin || !session.viewer))) {
+      this.#token = undefined;
+      throw new Error('The server returned an invalid account session. Check the session before continuing.');
+    }
+    return session;
+  }
+
   async state() {
     return this.#requestRoomSnapshot('/api/state');
   }
@@ -66,11 +108,18 @@ export class RoomApi {
     } catch {
       throw new Error('The server returned an invalid JSON response.');
     }
-    if (snapshot.token) this.#token = snapshot.token;
+    if (typeof snapshot.token === 'string' && snapshot.token) this.#token = snapshot.token;
     if (!response.ok) {
       if (response.status === 403 && !snapshot.token) this.#token = undefined;
-      throw new Error(snapshot.message || 'The request could not be completed.');
+      throw new ApiError(snapshot.message || 'The request could not be completed.', response.status);
     }
     return snapshot;
+  }
+}
+
+export class ApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
   }
 }

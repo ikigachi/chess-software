@@ -150,7 +150,7 @@ docker compose down
 
 `chess-core` defines the chess rules and data model and supports loading board positions from FEN. `player-service` resolves stable guest-player identities and stores public names in its own SQLite database. `game-service` executes room and game operations, manages sessions and stores matches. `chess-frontend` contains the board presentation, browser interactions and deployment checks. NGINX serves these assets and forwards public API requests to the game service.
 
-`register-service` owns account metadata, password hashes and account status. `authentication-service` reads those records and owns authenticated sessions in the same account file. Both are included in Compose and are called by game-service through HTTP ports. The browser-facing backend now supports accounts; the account forms and their JavaScript coordination are the next step.
+`register-service` owns account metadata, password hashes and account status. `authentication-service` reads those records and owns authenticated sessions in the same account file. Both are included in Compose and are called by game-service through HTTP ports. The browser-facing backend and Account tab support registration, sign-in, sign-out and deactivation.
 
 ## System architecture
 
@@ -172,11 +172,11 @@ flowchart LR
 
 The browser uses one web origin served by NGINX. The game and player services run in separate Java processes using Javalin, with one container per service in Compose. When opening a session, the game service obtains its guest-player identity through the `PlayerIdentity` port and its HTTP adapter. The game service persists rooms in SQLite and manages active browser sessions in memory. The player service persists profile identifiers and names in a separate SQLite file and volume. Browser cookies let the original players reopen a saved room with its code after restarting the services.
 
-Player identity resolution and profile-name operations remain separate from room coordination. Game-service now verifies account sessions before protected operations and permits guest access only while that player has no account. Existing HTML and JavaScript continue to support unregistered guests. Account form controls and matches-service extraction remain pending.
+Player identity resolution and profile-name operations remain separate from room coordination. Game-service now verifies account sessions before protected operations and permits guest access only while that player has no account. Existing HTML and JavaScript continue to support unregistered guests. Account controls are connected; matches-service extraction remains pending.
 
 ### Planned service boundaries
 
-This table records the responsibility split. Player, game, registration and authentication processes are implemented and deployed through Compose. Backend account permissions are connected; account forms and matches extraction remain pending.
+This table records the responsibility split. Player, game, registration and authentication processes are implemented and deployed through Compose. Backend account permissions and frontend account controls are connected; matches extraction remains pending.
 
 | Component | Responsibility and data ownership |
 | --- | --- |
@@ -238,7 +238,7 @@ The current registration routes are private service operations:
 
 Both require `application/json` and accept at most 8192 bytes. Invalid input or JSON returns `400`, duplicate registration `409`, an incorrect password or unavailable active account during deactivation `401`, unsupported content `415`, an oversized body `413`, and an identity or storage failure `503`. Responses use JSON and `Cache-Control: no-store` and contain no password, hash or guest credential. Deactivation resolves the account through the credential's player and verifies its password; supplying another account identifier cannot choose the target. It retains the username, player association and password hash, and never deletes match data. Registration has no retry key: a lost acknowledgement can follow a committed account, and a repeated request then returns a conflict.
 
-These private registration operations are not routed directly through NGINX. Game-service exposes a public adapter that obtains the guest credential from its own browser session or forwards a verified account token for deactivation. The browser never supplies either secret in JSON. The account forms remain pending; the public HTTP routes can already be used and tested.
+These private registration operations are not routed directly through NGINX. Game-service exposes a public adapter that obtains the guest credential from its own browser session or forwards a verified account token for deactivation. The browser never supplies either secret in JSON. The Account tab uses these public HTTP routes.
 
 Verify the registration service and its test dependencies with:
 
@@ -264,7 +264,7 @@ Tokens contain 32 bytes from `SecureRandom`, encoded as 43 canonical Base64url c
 
 Sessions have an absolute eight-hour lifetime and expire after thirty minutes without activity. Both boundaries are checked on the server; a successful session query refreshes activity but cannot extend the absolute deadline. Session creation atomically checks that the account is still active, saves the digest and removes expired, idle or inactive sessions. A failed insert rolls back that cleanup as well. Logout removes only the selected session. Session resolution checks the current account status in the same transaction as the activity update, so deactivation blocks every outstanding token on its next validation, including after an authentication-service restart. Inactive-session rows can remain until logout or the next successful login cleanup, but cannot authorize access. A storage failure returns `503` and never reports a successful login or logout.
 
-Private login uses the same JSON and 8192-byte limits as registration, with `400`, `415` and `413` for malformed input, unsupported content and oversized bodies. Invalid bearer tokens return `401`; unavailable storage returns `503`. The public game-service adapter now handles browser cookies and verifies these sessions for protected game and profile operations. The HTML account controls remain pending.
+Private login uses the same JSON and 8192-byte limits as registration, with `400`, `415` and `413` for malformed input, unsupported content and oversized bodies. Invalid bearer tokens return `401`; unavailable storage returns `503`. The public game-service adapter now handles browser cookies and verifies these sessions for protected game and profile operations. The Account tab provides the browser controls.
 
 Verify authentication, registration compatibility and session recovery with:
 
@@ -276,7 +276,7 @@ The private `GET /accounts/by-player/{playerId}` reports only whether an associa
 
 ### Browser account adapter and permissions
 
-The new routes are implemented by game-service and are available through the existing NGINX `/api` proxy. HTML account controls are not present yet. Browser requests use cookies automatically; JSON `token` always means the CSRF token, not the authenticated bearer token.
+The new routes are implemented by game-service and are available through the existing NGINX `/api` proxy. The Account tab uses these routes. Browser requests use cookies automatically; JSON `token` always means the CSRF token, not the authenticated bearer token.
 
 | Method and path | Input | Result |
 | --- | --- | --- |
@@ -296,13 +296,32 @@ Game-service retains its port-based account cases and HTTP clients. Player-servi
 
 Current-session names remain cached independently of the saved public profile. After login in another browser, `GET /api/profile` loads that profile without rewriting encounter names. Authenticated game access does not require a profile-service request on every poll. Browser-control activity is distinct from verified player activity: repeatedly loading a login challenge for an expired account cannot keep that player marked connected. The game service still caches control sessions, selected rooms and presence in one JVM; Consul and multi-instance game coordination remain pending.
 
+### Using accounts in the browser
+
+Open **Account** to create an account for the current guest or sign in with an existing username and password.
+Registration preserves the current player and requires an explicit sign-in. Enter the password again to sign in;
+password fields are cleared after each attempt and are never saved by the application in browser storage.
+The saved public name is loaded separately and can be changed in **Room** without changing names in older games.
+To return from another browser, sign in and join using the saved room code; the same player keeps their original seat.
+
+**Sign out** revokes the current account session and starts a new guest identity. Keep the room code before leaving.
+**Deactivate account** requires the password and an explicit confirmation checkbox. This blocks the account in every
+browser and retains recorded participants and moves. Account creation is hidden while a previous identity requires
+sign-in; **Continue as a new guest** explicitly clears that binding.
+
+A rejected session locks room, move and profile controls and retains the current board and move history on screen.
+The Account tab offers reauthentication or an explicit new guest. A fresh page loads session metadata before protected
+game state. **Check session** recovers after a service failure; unavailable services never silently enable guest access.
+An unconfirmed account write is followed by a session query, without automatically repeating the write. If that query
+also fails, account writes remain disabled until the session can be checked. Unregistered guests can still play normally.
+
 ### Lightweight frontend architecture
 
 | Role | Current implementation |
 | --- | --- |
 | UI | `index.html` templates, `style.css`, SVG assets and rendering functions in `app.js` |
-| Interaction use cases | `RoomActions` in `room-actions.js` loads state, executes room actions, recovers after a rejected move and coordinates synchronization |
-| Service boundary | `RoomActions` receives a service with `state()` and `action(action, fields)`. Both return a snapshot on success |
+| Interaction use cases | `RoomActions` in `room-actions.js` loads state, executes room actions, recovers after a rejected move and coordinates synchronization and account operations |
+| Service boundary | `RoomActions` receives a service exposing room, profile and account operations. Room operations return snapshots; profile and account operations have their own responses |
 | Communication adapter | `RoomApi` in `room-api.js`, using `fetch` and `response.json()` |
 | Composition | `main.js` connects `RoomApi` to `RoomActions` and passes the actions to `startApp()` |
 
@@ -351,7 +370,7 @@ The server rejects moves that leave the moving player's king in check or attempt
 
 ### Room, game and identity contracts
 
-These contracts describe the current application and the constraints for separating matches from games. Matches-service remains planned. Registration, authentication and the public backend account adapter are implemented; the HTML account forms are still pending.
+These contracts describe the current application and the constraints for separating matches from games. Matches-service remains planned. Registration, authentication, the public backend account adapter and the HTML account controls are implemented.
 
 | Concept | Identity and guarantees |
 | --- | --- |
@@ -447,13 +466,13 @@ The Java suites contain 200 cases: 195 without Docker and five opt-in deployment
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 
-Run the six frontend interaction and HTTP adapter tests with Node.js 24:
+Run the thirteen frontend interaction and HTTP adapter tests with Node.js 24:
 
 ```bash
-node --test chess-frontend/src/test/javascript/player-profile.test.mjs
+node --test chess-frontend/src/test/javascript/*.test.mjs
 ```
 
-These tests cover profile responses without board data, explicit profile writes, separate encounter names, lost acknowledgements, rejected names and stale background responses. Browser checks also cover saving and reloading a profile, preserving an edited encounter name and historical participants, rejecting a blank name, recovering after a player-service restart and the mobile layout.
+Seven account checks cover control-session recovery, CSRF rotation shared with game writes, public request contracts, malformed metadata, expired access, lost acknowledgements and stale synchronization. Six profile checks cover profile responses without board data, explicit profile writes, separate encounter names, lost acknowledgements, rejected names and stale background responses. Browser checks cover registration, wrong-password rejection, sign-out, sign-in from another cookie context, account deactivation observed by another session, saved board and history during access loss, authentication failure and recovery, desktop and 390-pixel mobile layouts, saving and reloading a profile, preserving an edited encounter name and historical participants, rejecting a blank name, recovering after a player-service restart and the mobile layout.
 
 With Docker running, enable the five Java deployment checks:
 

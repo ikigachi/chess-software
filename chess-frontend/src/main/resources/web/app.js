@@ -5,12 +5,15 @@ const roomForm = find('#room-form');
 const profileForm = find('#profile-form');
 const promotionDialog = find('#promotion-dialog');
 const promotionLetters = { queen: 'Q', rook: 'R', bishop: 'B', knight: 'N' };
-let snapshot;
+let snapshot = { viewer: null, room: null, pieces: new Map() };
 let selected = null;
 let busy = true;
 let savedProfile;
 let profileNeedsReload = true;
 let roomNameEdited = false;
+let accountSession;
+let accountBlocked = true;
+let accountNeedsReload = true;
 
 function notify(message, error = false) {
   const notice = find('#notice');
@@ -24,13 +27,20 @@ function setBusy(value) {
   document.querySelectorAll('button').forEach((button) => {
     button.disabled = button.hasAttribute('data-square') ? boardLocked() : value;
   });
-  find('#save-profile').disabled = value || profileNeedsReload;
-  find('#profile-name').disabled = value || profileNeedsReload;
-  find('#reload-profile').disabled = value || !snapshot;
+  find('#save-profile').disabled = value || accountBlocked || profileNeedsReload;
+  find('#profile-name').disabled = value || accountBlocked || profileNeedsReload;
+  find('#reload-profile').disabled = value || accountBlocked || !snapshot.viewer;
+  roomForm.querySelectorAll('button, input').forEach(element => { element.disabled = value || accountBlocked; });
+  find('#leave-room').disabled = value || accountBlocked;
+  find('#account-form').querySelectorAll('button, input').forEach(element => { element.disabled = value || accountNeedsReload; });
+  find('#deactivation-form').querySelectorAll('button, input').forEach(element => {
+    element.disabled = value || accountNeedsReload || !accountSession?.authenticated;
+  });
+  find('#sign-out').disabled = value || accountNeedsReload;
 }
 
 function boardLocked() {
-  return busy || gameFinished(snapshot?.room);
+  return busy || accountBlocked || gameFinished(snapshot?.room);
 }
 
 function gameFinished(room) {
@@ -82,7 +92,7 @@ function renderPlayer(target, player, color, connected) {
   const element = clone('#player-template');
   const isWhite = color === 'White';
   const name = player?.name || (isWhite ? 'White' : 'Waiting for opponent');
-  const isMe = player?.id === snapshot.viewer.id;
+  const isMe = Boolean(player && player.id === snapshot.viewer?.id);
   const room = snapshot.room;
   const isTurn = Boolean(room?.black && !gameFinished(room) && room.turn === color);
   element.classList.add(isWhite ? 'bottom' : 'top');
@@ -130,8 +140,9 @@ function renderBoard() {
     }
   }
   board.replaceChildren(squares);
-  board.setAttribute('aria-label', finished ? 'Final chess position' : 'Select a piece and its destination');
-  find('#board-hint').textContent = finished ? 'Game over.'
+  board.setAttribute('aria-label', accountBlocked ? 'Saved chess position. Check your session to continue.'
+    : finished ? 'Final chess position' : 'Select a piece and its destination');
+  find('#board-hint').textContent = accountBlocked ? 'Sign in or check your session to continue.' : finished ? 'Game over.'
     : selected ? `Selected piece: ${selected}. Choose a destination square.`
       : !room ? 'Your next great move starts here.'
         : room.black ? 'Select a piece, then its destination.' : 'Share your room code to get started.';
@@ -180,7 +191,7 @@ function render() {
   find('#room-description').textContent = room?.black ? 'Two players, one game. Moves update automatically.'
     : 'Waiting for your opponent. Share this code.';
   if (!roomNameEdited) {
-    const name = savedProfile?.name || snapshot.viewer.name;
+    const name = savedProfile?.name || snapshot.viewer?.name || 'Guest';
     find('#player-name').value = name === 'Guest' ? '' : name;
   }
 }
@@ -189,6 +200,114 @@ function showProfileStatus(message, error = false) {
   const status = find('#profile-status');
   status.textContent = message;
   status.classList.toggle('error', error);
+}
+
+function showAccountStatus(message, error = false) {
+  const status = find('#account-status');
+  status.textContent = message;
+  status.classList.toggle('error', error);
+}
+
+function applyAccountSession(session) {
+  accountSession = session;
+  accountNeedsReload = false;
+  accountBlocked = session.requiresLogin;
+  find('#account-form').hidden = session.authenticated;
+  find('#account-form button[value=register]').hidden = session.requiresLogin;
+  find('#account-exit').hidden = !session.authenticated && !session.requiresLogin;
+  find('#deactivation-area').hidden = !session.authenticated;
+  find('#sign-out').textContent = session.requiresLogin ? 'Continue as a new guest' : 'Sign out';
+  showAccountStatus(session.message || (session.requiresLogin ? 'Sign in to recover access to your saved games.'
+    : session.authenticated ? 'Signed in. Your player identity works across browsers.'
+      : 'Playing as a guest. Create an account to keep your player identity across browsers.'));
+  if (session.requiresLogin) {
+    selected = null;
+    if (promotionDialog.open) promotionDialog.close();
+    showProfileStatus('Sign in before loading or saving your profile.', true);
+    showPanel('account');
+  }
+}
+
+async function loadCurrentPlayer(actions) {
+  const next = await actions.load();
+  if (snapshot.viewer?.id !== next.viewer.id) {
+    savedProfile = undefined;
+    profileNeedsReload = true;
+    roomNameEdited = false;
+    find('#profile-name').value = '';
+  }
+  snapshot = next;
+  selected = null;
+  render();
+  try { await loadPlayerProfile(actions); }
+  catch (error) {
+    profileNeedsReload = true;
+    if (error.status === 401) throw error;
+    showProfileStatus(`${error.message} Load the saved name before trying to save.`, true);
+  }
+}
+
+async function reloadAccountSession(actions) {
+  if (busy) return;
+  setBusy(true);
+  try {
+    applyAccountSession(await actions.loadAccountSession());
+    if (!accountBlocked) await loadCurrentPlayer(actions);
+    notify(accountBlocked ? 'Your game is saved. Sign in to continue.' : 'Session checked.');
+    render();
+  } catch (error) {
+    accountNeedsReload = true;
+    accountBlocked = true;
+    showAccountStatus(`${error.message} Check the session before continuing.`, true);
+  } finally { setBusy(false); }
+}
+
+async function handleAuthorizationFailure(actions, error) {
+  if (error.status !== 401) return false;
+  accountBlocked = true;
+  selected = null;
+  if (promotionDialog.open) promotionDialog.close();
+  try {
+    applyAccountSession(await actions.loadAccountSession());
+    accountBlocked = true;
+    accountNeedsReload = !accountSession.requiresLogin;
+    if (accountNeedsReload) showAccountStatus('Your session changed. Check the session before continuing.', true);
+  } catch {
+    accountNeedsReload = true;
+    showAccountStatus('Your session could not be confirmed. Check the session before continuing.', true);
+  }
+  showPanel('account');
+  render();
+  setBusy(busy);
+  return true;
+}
+
+async function performAccountOperation(actions, operation) {
+  if (busy || accountNeedsReload) return;
+  setBusy(true);
+  try {
+    const session = await operation();
+    applyAccountSession(session);
+    if (!accountBlocked) await loadCurrentPlayer(actions);
+    notify(session.message || 'Session updated.');
+  } catch (error) {
+    try {
+      applyAccountSession(await actions.loadAccountSession());
+      if (!accountBlocked) await loadCurrentPlayer(actions);
+      showAccountStatus(`${error.message} ${accountBlocked ? 'Try signing in before creating another account.' : 'Your session has been checked.'}`, true);
+    } catch {
+      accountNeedsReload = true;
+      accountBlocked = true;
+      showAccountStatus(`${error.message} The session could not be confirmed. Check it before retrying.`, true);
+    }
+    notify(error.message, true);
+  } finally {
+    find('#account-password').value = '';
+    find('#deactivation-password').value = '';
+    find('#confirm-deactivation').checked = false;
+    render();
+    setBusy(false);
+  }
 }
 
 function applyPlayerProfile(profile, replaceDraft) {
@@ -207,18 +326,19 @@ async function loadPlayerProfile(actions) {
 }
 
 async function reloadPlayerProfile(actions) {
-  if (busy) return;
+  if (busy || accountBlocked) return;
   setBusy(true);
   try {
     await loadPlayerProfile(actions);
   } catch (error) {
+    if (await handleAuthorizationFailure(actions, error)) return;
     profileNeedsReload = true;
     showProfileStatus(`${error.message} Load the saved name before trying to save.`, true);
   } finally { setBusy(false); }
 }
 
 async function savePlayerProfile(actions) {
-  if (busy || profileNeedsReload) return;
+  if (busy || accountBlocked || profileNeedsReload) return;
   const name = find('#profile-name').value;
   setBusy(true);
   showProfileStatus('Saving your profile…');
@@ -228,6 +348,7 @@ async function savePlayerProfile(actions) {
     applyPlayerProfile(response.profile, true);
     showProfileStatus(`Saved as ${response.profile.name}. Existing games keep their recorded names.`);
   } catch (error) {
+    if (await handleAuthorizationFailure(actions, error)) return;
     profileNeedsReload = true;
     try {
       const response = await actions.loadPlayerProfile();
@@ -236,14 +357,15 @@ async function savePlayerProfile(actions) {
       applyPlayerProfile(response.profile, confirmed);
       showProfileStatus(confirmed ? `Saved as ${response.profile.name}. The saved name was confirmed after a connection problem.`
         : `${error.message} Saved name: ${response.profile.name}.`, !confirmed);
-    } catch {
+    } catch (confirmationError) {
+      if (await handleAuthorizationFailure(actions, confirmationError)) return;
       showProfileStatus(`${error.message} The saved name could not be confirmed. Load it before trying to save again.`, true);
     }
   } finally { setBusy(false); }
 }
 
 async function performAction(actions, action, fields) {
-  if (busy) return;
+  if (busy || accountBlocked) return;
   setBusy(true);
   try {
     const next = await actions.perform(action, fields);
@@ -256,6 +378,7 @@ async function performAction(actions, action, fields) {
     notify(positionMessage(snapshot.room) || actionMessage(action, fields));
   } catch (error) {
     notify(error.message, true);
+    if (await handleAuthorizationFailure(actions, error)) return;
     const recovered = await actions.recoverAfter(action);
     if (recovered) {
       snapshot = recovered;
@@ -272,7 +395,7 @@ function actionMessage(action, fields) {
 }
 
 async function syncState(actions) {
-  if (busy) return;
+  if (busy || accountBlocked) return;
   try {
     const result = await actions.synchronize(snapshot);
     if (!result) return;
@@ -299,6 +422,7 @@ async function syncState(actions) {
     notify(positionMessage(next.room) || (!next.room ? 'Your session has changed. Create or join a room.'
       : opponentJoined ? 'Your opponent joined. White to move.' : `Game updated. ${next.room.turn} to move.`));
   } catch (error) {
+    await handleAuthorizationFailure(actions, error);
     notify(error.message, true);
   }
 }
@@ -330,15 +454,16 @@ function handleBoardClick(event, perform) {
 async function initialize(actions) {
   setBusy(true);
   try {
-    snapshot = await actions.load();
+    applyAccountSession(await actions.loadAccountSession());
+    if (!accountBlocked) await loadCurrentPlayer(actions);
     render();
-    notify('');
-    try {
-      await loadPlayerProfile(actions);
-    } catch (error) {
-      showProfileStatus(`${error.message} Load the saved name before trying to save.`, true);
-    }
+    notify(accountBlocked ? 'Sign in to continue. Recorded games are saved.' : '');
   } catch (error) {
+    accountBlocked = true;
+    accountNeedsReload = true;
+    showAccountStatus(`${error.message} Check the session to reconnect.`, true);
+    showPanel('account');
+    render();
     notify(error.message, true);
     showProfileStatus('Refresh the game to reconnect, then load your saved name.', true);
   }
@@ -361,8 +486,23 @@ export function startApp(actions) {
     savePlayerProfile(actions);
   });
   find('#reload-profile').addEventListener('click', () => reloadPlayerProfile(actions));
-  find('#refresh-game').addEventListener('click', () => perform('refresh'));
+  find('#refresh-game').addEventListener('click', () => accountBlocked ? reloadAccountSession(actions) : perform('refresh'));
   find('#leave-room').addEventListener('click', () => perform('leave'));
+  find('#account-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const username = find('#account-username').value;
+    const password = find('#account-password').value;
+    performAccountOperation(actions, () => event.submitter?.value === 'register'
+      ? actions.registerAccount(username, password) : actions.login(username, password));
+  });
+  find('#sign-out').addEventListener('click', () => performAccountOperation(actions, () => actions.logout()));
+  find('#deactivation-form').addEventListener('submit', event => {
+    event.preventDefault();
+    const password = find('#deactivation-password').value;
+    if (find('#confirm-deactivation').checked)
+      performAccountOperation(actions, () => actions.deactivateAccount(password));
+  });
+  find('#reload-account').addEventListener('click', () => reloadAccountSession(actions));
   find('.brand').addEventListener('click', (event) => { event.preventDefault(); showPanel('moves'); });
   find('.nav-item.active').addEventListener('click', (event) => { event.preventDefault(); showPanel('moves'); });
 

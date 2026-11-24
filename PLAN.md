@@ -8,7 +8,7 @@ Este documento se escribe en español por petición expresa del usuario. El cód
 
 ## 1. Punto de partida comprobado
 
-Los tres primeros commits del bloque 5.4a están subidos: `d4671cf` para perfiles autenticados, `a12bcf2` para bajas y consultas de asociación y `4db73c5` para los clientes de cuentas. Esta entrega completa la conexión de permisos: game-service ofrece el adaptador público de cuentas, verifica la identidad para salas, movimientos y perfiles y bloquea las credenciales antiguas de invitados que ya tienen cuenta. Registro y autenticación están conectados en Compose con su base compartida. La verificación contiene 200 pruebas: 195 sin Docker y cinco de despliegue. Las pantallas de cuenta y su coordinación JavaScript siguen pendientes.
+Los tres primeros commits del bloque 5.4a están subidos: `d4671cf` para perfiles autenticados, `a12bcf2` para bajas y consultas de asociación y `4db73c5` para los clientes de cuentas. El cuarto commit, `c6b76bf`, completa la conexión de permisos y está subido: game-service ofrece el adaptador público de cuentas, verifica la identidad para salas, movimientos y perfiles y bloquea las credenciales antiguas de invitados que ya tienen cuenta. Registro y autenticación están conectados en Compose con su base compartida. La verificación contiene 200 pruebas: 195 sin Docker y cinco de despliegue. Los controles de cuenta del 5.4b quedan completados en esta entrega, verificados con 13 pruebas JavaScript, cinco comprobaciones Docker del frontend y un recorrido real del navegador.
 
 | Elemento | Situación actual |
 | --- | --- |
@@ -175,7 +175,7 @@ El contrato debe establecer quién conserva los asientos, cómo conoce `game-ser
 
 ### Fase 5. Registro y autenticación
 
-**Estado:** pasos 5.1 y 5.2 guardados en `877f733` y `424e30e`; paso 5.3 subido en `e4546f5`. El bloque 5.4a se ha dividido en cuatro commits revisables; esta entrega completa el último, tras los tres ya subidos. Incluye el adaptador público, los permisos de cuentas en salas y perfiles y el despliegue de los cuatro servicios Java por NGINX. Se adelantó este despliegue para que el servidor pudiera verificar las cuentas sin un modo alternativo que ignorase los servicios de seguridad. La interfaz HTML y JavaScript todavía no ofrece los controles de cuenta.
+**Estado:** pasos 5.1 y 5.2 guardados en `877f733` y `424e30e`; paso 5.3 subido en `e4546f5`. El bloque 5.4a está subido en cuatro commits revisables, terminado en `c6b76bf`. Esta entrega completa el bloque 5.4b con el commit `Connect account controls to the frontend`. Incluye el adaptador público, los permisos de cuentas en salas y perfiles y el despliegue de los cuatro servicios Java por NGINX. Se adelantó este despliegue para que el servidor pudiera verificar las cuentas sin un modo alternativo que ignorase los servicios de seguridad. La pestaña Account ofrece registro, login, logout y baja, y recupera la sesión antes de cargar el tablero.
 
 Autenticación se ejecuta en el puerto 8084 y exige que registro haya inicializado .regalia/accounts.sqlite. Abre el archivo sin crearlo y añade solo authentication_sessions mediante authentication-schema.sql. Lee cuentas y contraseñas sin depender de las clases Java de register-service en producción: AccountCredentials es una proyección privada de lectura, no otra entidad Account ni otro perfil. Registro conserva las escrituras de cuentas, hashes y estado; autenticación solo escribe sesiones.
 
@@ -196,8 +196,8 @@ El paso 5.4 se divide en dos bloques revisables:
 
 | Bloque | Trabajo y situación | Posible commit |
 | --- | --- | --- |
-| 5.4a | Adaptador público, cookies y CSRF, permisos de juego y perfiles y despliegue de los servicios de cuentas; completado localmente | `Connect authenticated sessions to game permissions` |
-| 5.4b | Controles de cuenta y recuperación de sesión en la interfaz; pendiente | `Connect account controls to the frontend` |
+| 5.4a | Adaptador público, cookies y CSRF, permisos de juego y perfiles y despliegue de los servicios de cuentas; subido en cuatro commits | `Connect authenticated sessions to game permissions` |
+| 5.4b | Controles de cuenta y recuperación de sesión en la interfaz; completados y verificados en esta entrega | `Connect account controls to the frontend` |
 
 Las pruebas del 5.4a verifican cuatro servicios HTTP separados y cinco contenedores temporales. Cubren registro sin aceptar actores declarados, cookies y tokens rotados, errores sin sobrescribir la sesión, inicio desde otro navegador, conservación de perfiles y nombres históricos, recuperación tras reiniciar, logout aunque falte la cookie de cuenta, caducidad, baja y rechazo de rutas antiguas con la credencial del invitado registrado. El volumen compartido de cuentas mantiene el mismo UID y cada servicio sigue escribiendo solamente sus tablas. Authentication-service puede reiniciarse durante el primer arranque hasta que registro haya inicializado el esquema; no se presenta esto como una comprobación de salud de kata 5.
 
@@ -333,7 +333,7 @@ El plan se actualizará si cambia el enunciado o una comprobación revela otra d
 
 ## 8. Siguiente acción concreta
 
-El último commit del bloque 5.4a es: **`Connect authenticated sessions to game permissions`**. El siguiente trabajo es **5.4b: añadir los controles de cuenta al frontend**, con el nombre propuesto **`Connect account controls to the frontend`**. Incluir registro, login, logout y baja, recuperar el estado de sesión y el nombre público y mostrar las restricciones por caducidad o baja sin perder el tablero ni el historial. El despliegue básico se adelantó al 5.4a para verificar los permisos con los servicios reales; después de la interfaz quedará el recorrido completo desde el navegador y su evidencia de entrega. Consul y las réplicas siguen pendientes en 3.4 a 3.7; las rutas antiguas de salas, en 6.4.
+El bloque 5.4a está subido hasta `c6b76bf`. El 5.4b se completa en esta entrega con el commit **`Connect account controls to the frontend`**. Se han comprobado registro, login, contraseña incorrecta, logout, perfil, dos movimientos entre cuenta e invitado, recuperación del mismo jugador desde otro contexto de cookies y baja que bloquea la otra sesión conservando tablero e historial visibles. También se han probado la caída y recuperación de autenticación y la presentación en móvil. El siguiente desarrollo es **6.1: consultas de encuentros mediante puertos**, con el nombre propuesto **`Add match queries through application ports`**. Antes de extraer escrituras, se concretará el contrato de consultas sin duplicar movimientos ni romper la transacción actual. Consul y réplicas siguen pendientes en 3.4 a 3.7 y las rutas antiguas, en 6.4.
 
 La creación de este documento no implementa estas fases ni crea un commit.
 

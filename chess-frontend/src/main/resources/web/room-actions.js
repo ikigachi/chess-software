@@ -13,6 +13,26 @@ export class RoomActions {
     return this.#service.state();
   }
 
+  async loadAccountSession() {
+    return this.#performOperation(() => this.#service.loadAccountSession());
+  }
+
+  async registerAccount(username, password) {
+    return this.#performOperation(() => this.#service.registerAccount(username, password));
+  }
+
+  async login(username, password) {
+    return this.#performOperation(() => this.#service.login(username, password));
+  }
+
+  async logout() {
+    return this.#performOperation(() => this.#service.logout());
+  }
+
+  async deactivateAccount(password) {
+    return this.#performOperation(() => this.#service.deactivateAccount(password));
+  }
+
   async perform(action, fields = {}) {
     return this.#performOperation(() => this.#service.action(action, fields));
   }
