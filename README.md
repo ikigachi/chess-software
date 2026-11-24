@@ -17,7 +17,7 @@ Build a chess application where two users connect through a shared room code, pl
 | Password4j | 1.8.4, Argon2id password hashing in registration and verification in authentication |
 | JUnit Jupiter | 5.11.4, automated tests only |
 | Node.js | 24, optional frontend tests only; no frontend server or npm packages required |
-| Docker and Compose | Builds and runs NGINX and the two Java services; verified with Docker Desktop Linux containers on Windows |
+| Docker and Compose | Builds and runs NGINX and four Java services; verified with Docker Desktop Linux containers on Windows |
 
 From the repository root:
 
@@ -25,13 +25,13 @@ From the repository root:
 mvn compile
 ```
 
-In IntelliJ, open the root `pom.xml`, select JDK 27 and reload Maven. The browser deployment uses the Java entry points `software.ulpgc.chess.playerservice.Main` and `software.ulpgc.chess.gameservice.Main`. Docker Compose starts both services and NGINX together, as described below. The registration API can also run directly through `software.ulpgc.chess.registerservice.Main`; its setup is described under account registration below.
+In IntelliJ, open the root `pom.xml`, select JDK 27 and reload Maven. The Java entry points are the `Main` classes in player-service, register-service, authentication-service and game-service. Use the repository root as their working directory. Compose starts all four services with NGINX and is the recommended browser setup.
 
-The separate authentication API starts through `software.ulpgc.chess.authenticationservice.Main` after registration has initialized the shared account database. Its session routes and arguments are described below. These two account services are not yet connected to the board or included in Compose.
+For direct Java API development, start player-service, then register-service to initialize the account database, then authentication-service and game-service. The player and registration HTTP clients connect lazily, so their startup does not call back into authentication. Direct Java entry points default to loopback.
 
-For direct Java API development, start the player service first and then the game service, using the repository root as their working directory. They listen on `127.0.0.1:8082` and `127.0.0.1:8081`, with `.regalia/players.sqlite` and `.regalia/rooms.sqlite`. Their default ports and database files can be overridden with arguments: `8092 .regalia/test-players.sqlite` for players and `8091 .regalia/test.sqlite http://127.0.0.1:8092` for games. These direct API runs do not serve the browser assets; the browser deployment uses NGINX and the services in Compose.
+The default direct ports are 8082 for players, 8083 for registration, 8084 for authentication and 8081 for games. Player and game databases remain `.regalia/players.sqlite` and `.regalia/rooms.sqlite`; registration and authentication share `.regalia/accounts.sqlite`. Existing positional arguments retain their meaning. Player-service optionally accepts the authentication origin as its fourth argument, register-service as its fifth, and game-service accepts registration and authentication origins as its fifth and sixth arguments. Their defaults are `http://127.0.0.1:8083` and `http://127.0.0.1:8084` where applicable. These direct API runs do not host browser assets.
 
-### Run the three containers
+### Run the five containers
 
 With Docker running in Linux-container mode and port 8080 available, run these commands from the repository root. The Java services are built inside Docker; this path does not require Java or Maven on the host:
 
@@ -43,16 +43,17 @@ docker compose exec nginx nginx -t
 
 Open [Regalia through NGINX](http://127.0.0.1:8080) after the services finish starting. NGINX serves the frontend directly from its source directory and forwards `/api`, `/api/...`, `/games` and `/games/...` to `http://game-service:8081`. The game service calls `http://player-service:8082`. The internal player-service endpoints are not routed. Java remains responsible for sessions, profiles, rules and storage.
 
-`compose.yaml` defines three containers: NGINX, `game-service` and `player-service`. NGINX uses an official image; it is not a Java module. The shared Dockerfile builds the two Java modules with Maven and JDK 27, then copies their classes and runtime dependencies into separate Java 27 runtime images. All base images are pinned by digest. `.dockerignore` includes only the required POM files and Java service sources in the build context.
+`compose.yaml` defines NGINX, game-service, player-service, register-service and authentication-service. The shared Dockerfile builds the four Java services with Maven and JDK 27 and packages each in its own Java 27 runtime target. Base images remain pinned by digest. `.dockerignore` includes the required POMs and service sources; the frontend remains a read-only mount served by NGINX.
 
-Only NGINX publishes a host port, bound to `127.0.0.1`. Both Java services listen on `0.0.0.0` inside their containers and communicate through Compose DNS; their ports are not published on the host. NGINX mounts the frontend and its configuration template read-only and resolves the game service through Docker's DNS. See the [Docker networking documentation](https://docs.docker.com/engine/network/).
+Only NGINX publishes a host port, bound to `127.0.0.1`. The four Java services listen on `0.0.0.0` inside their containers and use Compose DNS; their ports remain private. NGINX forwards `/api` and `/games` to game-service, including the new browser account routes. It does not publish the private `/accounts`, `/sessions` or `/players/current` endpoints.
 
 | Volume | File in its owning container |
 | --- | --- |
 | `players-data` | `/data/players.sqlite`, written only by `player-service` |
-| `rooms-data` | `/data/rooms.sqlite`, written only by `game-service` |
+| `rooms-data` | `/data/rooms.sqlite`, written only by game-service |
+| `accounts-data` | `/data/accounts.sqlite`, shared by registration and authentication with separate table ownership |
 
-Docker volumes are separate from the `.regalia` files used by direct Java runs. Existing local databases are not imported automatically. The runtime containers use a non-root user, and their volumes preserve profiles, rooms and moves when containers are recreated.
+Docker volumes are separate from direct Java `.regalia` files. Existing local databases are not imported automatically. All Java containers use the same non-root UID, allowing the two account services to access their shared volume. Registration creates the account schema; authentication starts after it and uses `restart: on-failure` if schema initialization has not finished. This is startup recovery, not a health check. Volumes preserve profiles, games, accounts and session digests across container recreation.
 
 For a web entry point on port 8090, set this variable in PowerShell before starting Compose:
 
@@ -149,7 +150,7 @@ docker compose down
 
 `chess-core` defines the chess rules and data model and supports loading board positions from FEN. `player-service` resolves stable guest-player identities and stores public names in its own SQLite database. `game-service` executes room and game operations, manages sessions and stores matches. `chess-frontend` contains the board presentation, browser interactions and deployment checks. NGINX serves these assets and forwards public API requests to the game service.
 
-`register-service` provides account registration and deactivation through a separate Javalin server on direct port 8083. `authentication-service` provides login, session validation and logout on direct port 8084. They share the account database with separate write responsibilities: registration owns account metadata and password hashes; authentication owns session rows. Neither is yet included in Compose or routed through NGINX. The Docker build includes their POMs so Maven can load the six-module reactor while building the two containerized Java services.
+`register-service` owns account metadata, password hashes and account status. `authentication-service` reads those records and owns authenticated sessions in the same account file. Both are included in Compose and are called by game-service through HTTP ports. The browser-facing backend now supports accounts; the account forms and their JavaScript coordination are the next step.
 
 ## System architecture
 
@@ -160,15 +161,22 @@ flowchart LR
     G -->|"PlayerIdentity via HTTP/JSON"| P["Player service: port 8082"]
     G -->|"RoomRepository via JDBC"| D["Rooms SQLite database"]
     P -->|"PlayerRepository via JDBC"| PD["Players SQLite database"]
+    G -->|"AccountRegistration via HTTP"| R["Register service: port 8083"]
+    G -->|"AccountAuthentication via HTTP"| A["Authentication service: port 8084"]
+    R -->|"Resolve guest identity"| P
+    R -->|"Verify account token"| A
+    P -->|"Verify account profile token"| A
+    R -->|"Account metadata and hashes"| AD["Shared accounts SQLite database"]
+    A -->|"Read accounts and write sessions"| AD
 ```
 
 The browser uses one web origin served by NGINX. The game and player services run in separate Java processes using Javalin, with one container per service in Compose. When opening a session, the game service obtains its guest-player identity through the `PlayerIdentity` port and its HTTP adapter. The game service persists rooms in SQLite and manages active browser sessions in memory. The player service persists profile identifiers and names in a separate SQLite file and volume. Browser cookies let the original players reopen a saved room with its code after restarting the services.
 
-Player identity resolution and profile-name operations have been extracted, including frontend profile editing. NGINX hosting and routing are available through Compose. Names supplied when entering a room, room coordination and guest browser sessions remain in `game-service`. Registration and authentication are implemented as directly runnable private services; their board integration and deployment are pending. `matches-service` remains planned.
+Player identity resolution and profile-name operations remain separate from room coordination. Game-service now verifies account sessions before protected operations and permits guest access only while that player has no account. Existing HTML and JavaScript continue to support unregistered guests. Account form controls and matches-service extraction remain pending.
 
 ### Planned service boundaries
 
-This table records the responsibility split. Player, game, registration and authentication processes are implemented; matches extraction and the board's transition from guest to authenticated sessions are pending.
+This table records the responsibility split. Player, game, registration and authentication processes are implemented and deployed through Compose. Backend account permissions are connected; account forms and matches extraction remain pending.
 
 | Component | Responsibility and data ownership |
 | --- | --- |
@@ -219,37 +227,18 @@ The username is separate from a public display name. It uses 3 to 40 ASCII lette
 
 `SqliteAccountDatabase.initializeSchema()` explicitly applies `register-service/src/main/resources/account-schema.sql` to `.regalia/accounts.sqlite` by default. Repeated initialization preserves accounts and adds `account_passwords` without changing old identifiers or statuses. That table references `accounts.id`, with foreign keys enabled for each connection. Legacy accounts without a hash remain unchanged and receive no default password; an explicit credential-enrollment process would be required to make them usable for authentication. Registration owns schema initialization, account metadata, password hashes and account status. Authentication reads these records from the same database and owns its session operations. The player reference has no cross-database foreign key and is resolved through the identity port. Existing game and player entry points never open this database.
 
-Start the player service first, then run `software.ulpgc.chess.registerservice.Main` in IntelliJ with the repository root as its working directory. It defaults to `127.0.0.1:8083`, `.regalia/accounts.sqlite` and player origin `http://127.0.0.1:8082`. Optional arguments follow this order: `8093 .regalia/test-accounts.sqlite http://127.0.0.1:8092 127.0.0.1`. The fourth argument selects the bind address and defaults to loopback. The HTTP client and server close explicitly when the process stops.
+Start the player service first, then run `software.ulpgc.chess.registerservice.Main` in IntelliJ with the repository root as its working directory. It defaults to `127.0.0.1:8083`, `.regalia/accounts.sqlite` and player origin `http://127.0.0.1:8082`. Optional arguments follow this order: `8093 .regalia/test-accounts.sqlite http://127.0.0.1:8092 127.0.0.1`. The final bind address defaults to loopback. The HTTP client and server close explicitly when the process stops.
 
 The current registration routes are private service operations:
 
 | Method and path | JSON fields | Successful result |
 | --- | --- | --- |
 | `POST /accounts` | `credential`, `username`, `password` | `201`, with generated `id`, normalized `username`, resolved `playerId` and `status: "Active"` |
-| `DELETE /accounts/current` | `credential`, `password` | `200`, preserving the account and player identifiers with `status: "Inactive"` |
+| `DELETE /accounts/current` | `credential` and `password`, or `password` with an account bearer header | `200`, preserving the account and player identifiers with `status: "Inactive"` |
 
 Both require `application/json` and accept at most 8192 bytes. Invalid input or JSON returns `400`, duplicate registration `409`, an incorrect password or unavailable active account during deactivation `401`, unsupported content `415`, an oversized body `413`, and an identity or storage failure `503`. Responses use JSON and `Cache-Control: no-store` and contain no password, hash or guest credential. Deactivation resolves the account through the credential's player and verifies its password; supplying another account identifier cannot choose the target. It retains the username, player association and password hash, and never deletes match data. Registration has no retry key: a lost acknowledgement can follow a committed account, and a repeated request then returns a conflict.
 
-`DELETE /accounts/current` also accepts `Authorization: Bearer <account-session-token>` with a JSON
-`password`. `AccountIdentity` is the application port; `HttpAccountIdentity` validates the session through
-`GET /sessions/current` on the authentication service and supplies the player identifier. With this header,
-body identifiers and guest credentials cannot select the account. Invalid or expired authorization returns
-`401` without falling back to a supplied guest credential. The password is still required. Authentication
-failures return `503` and preserve the account. The existing credential-and-password mode remains available
-for private callers without an Authorization header.
-
-`GET /accounts/by-player/{playerId}` returns only `{ "registered": true }` or `{ "registered": false }`.
-It checks whether an association exists, including for an inactive account; it does not report whether the
-account is active. It returns no username, account identifier or credentials and uses `Cache-Control: no-store`.
-Storage failures return `503`, never a false absent-association result. Unsupported methods return `405`
-with `Allow: GET`. This private lookup prepares the board's future guest-access checks; those checks are not
-connected yet. The optional fifth registration-service argument selects the authentication origin, defaulting
-to `http://127.0.0.1:8084`; the fourth argument remains the bind address.
-
-Six additional registration HTTP checks cover authenticated actor selection, password and session rejection,
-association retention after deactivation and restart, unavailable authentication and failed storage operations.
-
-These operations are not browser endpoints yet: NGINX still routes only `/api` and `/games`, and the board continues to use guest sessions. A future public adapter must obtain the guest credential from its server-side session and check its token, as the profile adapter already does. Account deactivation now blocks authenticated sessions through the authentication service, but still does not revoke the independent game-service guest session. The board's authenticated identity checks and forms belong to step 5.4.
+These private registration operations are not routed directly through NGINX. Game-service exposes a public adapter that obtains the guest credential from its own browser session or forwards a verified account token for deactivation. The browser never supplies either secret in JSON. The account forms remain pending; the public HTTP routes can already be used and tested.
 
 Verify the registration service and its test dependencies with:
 
@@ -275,13 +264,37 @@ Tokens contain 32 bytes from `SecureRandom`, encoded as 43 canonical Base64url c
 
 Sessions have an absolute eight-hour lifetime and expire after thirty minutes without activity. Both boundaries are checked on the server; a successful session query refreshes activity but cannot extend the absolute deadline. Session creation atomically checks that the account is still active, saves the digest and removes expired, idle or inactive sessions. A failed insert rolls back that cleanup as well. Logout removes only the selected session. Session resolution checks the current account status in the same transaction as the activity update, so deactivation blocks every outstanding token on its next validation, including after an authentication-service restart. Inactive-session rows can remain until logout or the next successful login cleanup, but cannot authorize access. A storage failure returns `503` and never reports a successful login or logout.
 
-Login uses the same JSON content and 8192-byte body limits as registration, with `400`, `415` and `413` for malformed input, unsupported content and oversized bodies. Invalid, missing, revoked or expired bearer tokens return `401`; unavailable storage returns `503`. Browser cookies, public login controls and the connection of this identity to room permissions are still pending in step 5.4. The existing guest board is not yet protected by these account sessions.
+Private login uses the same JSON and 8192-byte limits as registration, with `400`, `415` and `413` for malformed input, unsupported content and oversized bodies. Invalid bearer tokens return `401`; unavailable storage returns `503`. The public game-service adapter now handles browser cookies and verifies these sessions for protected game and profile operations. The HTML account controls remain pending.
 
 Verify authentication, registration compatibility and session recovery with:
 
 ```bash
 mvn -pl authentication-service -am test
 ```
+
+The private `GET /accounts/by-player/{playerId}` reports only whether an association exists, including inactive accounts. Storage errors remain `503` rather than an absent association. Game-service uses `AccountRegistration`, `AccountAuthentication` and `AccountPlayerProfiles`; their HTTP adapters validate remote responses and keep bearer tokens in Authorization headers.
+
+### Browser account adapter and permissions
+
+The new routes are implemented by game-service and are available through the existing NGINX `/api` proxy. HTML account controls are not present yet. Browser requests use cookies automatically; JSON `token` always means the CSRF token, not the authenticated bearer token.
+
+| Method and path | Input | Result |
+| --- | --- | --- |
+| `GET /api/session` | Browser cookies | Browser session state, `viewer`, CSRF `token`, `authenticated` and `requiresLogin` |
+| `POST /api/accounts` | JSON `username`, `password`, `token` | `201`; registers the current guest and requires an explicit login |
+| `POST /api/session` | JSON `username`, `password`, `token` | `201`; issues the account cookie and rotates the browser session and CSRF token |
+| `DELETE /api/session` | JSON `token` | `200`; revokes the bound account session, clears its cookie and creates a fresh guest context |
+| `DELETE /api/accounts/current` | JSON `password`, `token` | `200`; deactivates the verified account and clears its browser binding |
+
+Load `/api/session` or `/api/state` before a write to obtain the browser's CSRF token. JSON content type, string fields and the 8192-byte limit are enforced. Missing browser sessions return `401`, mismatched CSRF tokens or foreign origins return `403`, duplicate accounts return `409`, invalid JSON returns `400`, unsupported content returns `415`, oversized bodies return `413` and unavailable services return `503`. A failed login preserves the current cookies, viewer and CSRF token. A service failure during initial session lookup does not issue a new control cookie. An expired account can still load `/api/session` to obtain a challenge for explicit logout or reauthentication; this does not authorize game or profile operations.
+
+The existing `regalia` cookie identifies the browser control session. `regalia-account` holds the authenticated token. Both are `HttpOnly`, `SameSite=Lax` and scoped to `/`; HTTPS requests also receive `Secure`. The authenticated cookie expires no later than the granted absolute lifetime. Account login, logout and deactivation rotate the control cookie and CSRF token. Neither the guest credential nor the bearer token is returned in JSON, placed in a URL or intended for JavaScript storage. The public adapter uses the [synchronizer-token approach](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html).
+
+Every protected request validates its actor before a room, move, profile or account write. Guest access checks the original player association even after the game service restarts, so registering or deactivating an account blocks its previous guest credential. An invalid or expired account cookie never silently becomes a guest identity. Explicit logout creates a different guest identifier that has no historical seats for the former account. Public `GET /games/{id}` remains a read-only query by code, as documented previously.
+
+Game-service retains its port-based account cases and HTTP clients. Player-service's private `GET` and `PUT /players/current` validate the bearer token through authentication before loading or updating that player's profile. Registration's bearer-authenticated deactivation does the same; its private `GET /accounts/by-player/{playerId}` is a read-only association lookup. Account identifiers or guest credentials supplied in browser JSON are not forwarded as authority. The internal `/players`, `/accounts` and `/sessions` routes remain inaccessible through NGINX.
+
+Current-session names remain cached independently of the saved public profile. After login in another browser, `GET /api/profile` loads that profile without rewriting encounter names. Authenticated game access does not require a profile-service request on every poll. Browser-control activity is distinct from verified player activity: repeatedly loading a login challenge for an expired account cannot keep that player marked connected. The game service still caches control sessions, selected rooms and presence in one JVM; Consul and multi-instance game coordination remain pending.
 
 ### Lightweight frontend architecture
 
@@ -295,53 +308,15 @@ mvn -pl authentication-service -am test
 
 `app.js` handles browser events, square selection and rendering. `RoomActions` can run with a service double and without browser elements. The backend validates every submitted move.
 
-### Account service clients in game-service
-
-`AccountAuthentication`, `AccountRegistration` and `AccountPlayerProfiles` define the outgoing account
-operations needed by the game application. Their results use immutable session values, stable player identifiers
-and the existing `User` model, with no HTTP or JSON types in the application ports.
-
-`HttpAccountServices` implements login, session validation and logout against the authentication origin, and
-registration, association lookup and authenticated deactivation against a separate registration origin.
-`HttpPlayerService` also implements account-profile reads and updates through `/players/current`.
-Session tokens travel in the Authorization header; deactivation sends only the password in its JSON body,
-and profile updates send only the requested name. Logout tolerates an already rejected session.
-
-The adapters validate response fields, account statuses and session dates, limit response bodies to 8192 bytes,
-and distinguish invalid input, rejected authentication, registration conflicts and unavailable services.
-Malformed or incomplete successful responses remain service failures. An unavailable lookup never implies
-that a player has no account, and failed logout requests never report success. The clients close their HTTP
-resources explicitly. They have no production Java dependency on registration or authentication modules.
-These clients are prepared independently; their connection to browser sessions and game permissions remains
-pending, and this change adds no public account routes or Docker services.
-
-Run `mvn -pl game-service -am test` to verify the clients and existing game behavior. Eight added HTTP checks
-cover separate service origins, request bodies and bearer headers, successful sessions and account operations,
-rejected credentials, registration conflicts, malformed responses and unavailable services.
-
 ## Communication contract
 
-The game service calls `POST /players/resolve` on the player-service origin with a JSON `credential` containing the browser's canonical UUID cookie value. The response contains `id` and the saved profile `name`, or `Guest` for an unnamed player. The identifier preserves the previous SHA-256 mapping, so existing players keep their seats after the extraction. Invalid credentials or JSON return `400`; unsupported methods, content types and oversized bodies return `405`, `415` and `413`. This remains guest identity resolution; the separate account authentication API is not yet connected to the board.
+For an unregistered guest, game-service calls `POST /players/resolve` with the canonical UUID credential from its server-side browser session. The player identifier preserves the existing SHA-256 mapping and historical seats. The backend also asks registration whether that player has an account; registered and inactive players must authenticate rather than continue under the old guest credential. Failed registration lookups return `503` instead of granting guest access.
 
 `PUT /players/name` on the player-service origin accepts JSON with `credential` and `name`, and returns the same identifier with the updated name. Names are trimmed and must contain between 1 and 40 characters. Invalid requests leave the previous name unchanged. This is an independent profile operation: creating or joining a room does not rename the profile. A new game-service session loads the saved profile name; existing sessions retain their current name. Names recorded in earlier rooms and games remain unchanged. Profiles are stored in `.regalia/players.sqlite` and retain their names and identifiers after the player service restarts. Storage failures return `503` and preserve the previous profile.
 
-`GET /players/current` and `PUT /players/current` are private account-profile operations. Both require an
-`Authorization: Bearer <account-session-token>` header. The player service validates the token through
-`GET /sessions/current` on the authentication service and uses only the returned player identifier.
-The update accepts a JSON `name`; supplied identifiers or guest credentials cannot select another player.
-A read of an unsaved profile returns `Guest` without writing it. Renaming preserves the stable identifier
-and participant names already recorded in games. Missing, invalid or expired tokens return `401`; invalid
-names or JSON return `400`; authentication or storage failures return `503` without changing the saved name.
-These routes are not exposed through NGINX or used by the board yet. The existing private guest routes
-remain available. The optional fourth player-service argument selects the authentication origin, defaulting
-to `http://127.0.0.1:8084`; its third argument remains the bind address.
-
-Run `mvn -pl player-service -am test` to verify authenticated profile reads and writes, forged identifiers,
-rejected sessions and names, authentication failures and recovery of saved names after a server restart.
-
 If the player service is unavailable, opening a new game-service session returns `503` without issuing a cookie or changing a game. Existing sessions can continue playing. The browser continues to communicate with the web server.
 
-`GET /api/profile` loads the current player profile and refreshes its cached session name. `PUT /api/profile` accepts JSON with `name` and `token` and updates that profile. Both routes require an active game-service session, initialized by `GET /api/state`, and return `{ "profile": { "id": "...", "name": "..." }, "token": "..." }`. The server obtains the player credential from its session; supplied `id` or `credential` fields do not choose the target player. The browser never needs to read its HttpOnly cookie.
+`GET /api/profile` loads the current player profile and refreshes its cached session name. `PUT /api/profile` accepts JSON with `name` and `token` and updates that profile. Both routes require a valid game-service session, initialized by `GET /api/state`, and return `{ "profile": { "id": "...", "name": "..." }, "token": "..." }`. The server obtains the guest credential or authenticated token from its session; supplied `id` or `credential` fields do not choose the target player. The browser never needs to read its HttpOnly cookie.
 
 An absent or expired profile session returns `401` without issuing a new cookie. Invalid update tokens return `403`; invalid JSON or names return `400`; unsupported content types return `415`; oversized bodies return `413`; and unavailable or invalid player-service responses return `503`. Successful updates change the cached viewer name while preserving the session identity, token, room, board and recorded participants. After a failed acknowledgement, `GET /api/profile` can reload the actual saved name before a retry.
 
@@ -376,7 +351,7 @@ The server rejects moves that leave the moving player's king in check or attempt
 
 ### Room, game and identity contracts
 
-These contracts describe the current application and the constraints for separating matches from games. `matches-service` is planned; private registration and authentication APIs are implemented, while the browser board still uses guest sessions.
+These contracts describe the current application and the constraints for separating matches from games. Matches-service remains planned. Registration, authentication and the public backend account adapter are implemented; the HTML account forms are still pending.
 
 | Concept | Identity and guarantees |
 | --- | --- |
@@ -384,9 +359,9 @@ These contracts describe the current application and the constraints for separat
 | Game | `Game.id()` identifies the chess game; `State` and ordered `Move` values determine its position and result. Current creation uses the room code as the game identifier, and `/games/{id}` currently looks up that room code. Existing identifiers and URLs must remain usable during extraction. |
 | Participant | The `User` stored in `Room.white()` or `Room.black()` records a stable player identifier and the name used when taking that seat. Membership compares identifiers; a matching name grants no membership. A profile rename cannot replace this historical value. |
 | Profile | `player-service` owns the current public name for a stable `User.id()`. Its name may differ from the names in recorded encounters. The player repository never writes rooms or moves. |
-| Acting player | The HTTP adapter resolves the current player from the server-side browser session. A write also checks that session's token. Browser-supplied `userId`, `id`, names or another session's token cannot select the actor. These are guest sessions, not authenticated accounts. |
+| Acting player | The backend verifies the account cookie through authentication or resolves an unregistered guest. Writes also require that browser session's CSRF token. Browser-supplied identifiers, credentials or another session's token cannot select the actor. |
 | Viewed room | The session's current room selects the board returned by `/api/state` and affects presence. It does not allocate a seat or define membership in other rooms. A participant can submit a legal move to a room they belong to while viewing another room. |
-| Account | The private registration service associates a generated account identifier and unique login username with the player resolved from its guest credential. Registration stores an encoded password hash; deactivation requires that player's credential and password. Authenticated sessions are implemented in the private authentication API; browser integration remains pending. Account identifiers never replace historical player identifiers. |
+| Account | Registration preserves a stable player association. Game-service verifies its authenticated session before protected operations. Registration, logout and deactivation cannot restore historical account permissions through the former guest credential. The remaining UI work does not change these server checks. |
 
 `User` is the existing immutable identifier-and-name value used for both profiles and historical participants. These roles do not require duplicate `Player` or `Participant` classes at this stage. A distinct actor type or internal service port will be introduced when an implemented use case needs its contract.
 
@@ -468,7 +443,7 @@ Run the Java checks that do not require Docker from the repository root:
 mvn test
 ```
 
-The Java suites contain 191 cases: 187 checks without Docker and four opt-in deployment checks. The account-client commit was verified independently with all 187 non-Docker checks passing; the four Docker checks were skipped in that run. Five account-profile checks cover verified actor selection, rejected sessions and names, authentication failures and saved-name recovery. Seventeen authentication checks cover independent clients, stable player identity, token handling, restart recovery, inactivity and absolute expiry, account deactivation, atomic failures and substitution of application ports. The 32 registration checks cover domain invariants, identity resolution, independent Argon2id salts and password verification, wrong-actor and wrong-password rejection, concurrent duplicate registration, atomic account-and-password writes, deactivation failures, additive schema migration and restart recovery. Seven of these cases exercise the registration API with a separate player HTTP server. The SQLite refactoring checks include continuing stored games while preserving distinct room and game identifiers, creation dates, historical participants and other rooms' histories. `GameHttpIntegrationTest` in `game-service` checks the API directly using separate game and player HTTP servers. Its 33 cases include the room, profile, session, JSON, concurrency, promotion, en passant, castling, result and restart checks from the former gateway suite, plus the two-room identity contract. Room and player repository contract tests run against SQLite and in-memory storage; storage tests cover rejected writes, invalid stored data and recovery. Docker checks in `chess-frontend` cover frontend hosting and HTTP forwarding, including the migrated markup, script and piece-asset checks. An unavailable game service produces `503` while the page remains accessible. To reproduce recovery, play two moves, note the room code, restart the services and rejoin with that code in the original browser windows. Both players should see the same board, turn and history and be able to continue.
+The Java suites contain 200 cases: 195 without Docker and five opt-in deployment checks. The new coverage includes eight public account-permission HTTP scenarios against the four independent services and a malformed account-response adapter check. They cover registration, cookie and CSRF handling, historical identity and names, login in another browser, restart recovery, logout with a missing account cookie, expiry, deactivation, legacy-route bypass attempts, failed dependencies and rejected writes. The five Docker checks cover frontend assets, proxy contracts, guest recovery, service failures and account login/profile/history recovery after recreating account and game containers. The existing 33 direct game API cases, 32 registration cases, 17 authentication cases, chess rules and repository contracts remain in the suite.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 
@@ -480,13 +455,13 @@ node --test chess-frontend/src/test/javascript/player-profile.test.mjs
 
 These tests cover profile responses without board data, explicit profile writes, separate encounter names, lost acknowledgements, rejected names and stale background responses. Browser checks also cover saving and reloading a profile, preserving an edited encounter name and historical participants, rejecting a blank name, recovering after a player-service restart and the mobile layout.
 
-With Docker running, enable the four Java deployment checks:
+With Docker running, enable the five Java deployment checks:
 
 ```bash
 mvn -Dregalia.docker.tests=true test
 ```
 
-`DockerDeploymentIntegrationTest` in `chess-frontend` creates its own Compose project, selects a free local port, builds and starts all three containers and checks the generated NGINX configuration. It verifies markup, JavaScript MIME types, piece assets, separation of player text from the HTML document, browser cookies, room creation and joining, moves, profiles, historical names, `Location` and `Allow`, rejected requests and the 8192-byte body boundary. It recreates both Java containers and recovers the same profile, game and moves from their volumes, then continues playing. A stopped game service and a paused, unresponsive game service both produce JSON with status `503`; the frontend remains accessible. The test removes only its own containers and temporary data volumes, and leaves command logs under `chess-frontend/target/docker-check-*`. Its Java test dependencies are test-scoped; the frontend runtime remains HTML, CSS and JavaScript. Python is not required to build, run or verify this deployment.
+`DockerDeploymentIntegrationTest` in `chess-frontend` creates its own Compose project, selects a free local port, builds and starts all five containers and checks the generated NGINX configuration. It verifies markup, JavaScript MIME types, piece assets, separation of player text from the HTML document, browser cookies, room creation and joining, moves, profiles, historical names, `Location` and `Allow`, rejected requests and the 8192-byte body boundary. It recreates the player and game containers for guest recovery, and the account and game containers for authenticated recovery. Both paths preserve the recorded participants, profile and moves and allow play to continue. A stopped game service and a paused, unresponsive game service both produce JSON with status `503`; the frontend remains accessible. The test removes only its own containers and temporary data volumes, and leaves command logs under `chess-frontend/target/docker-check-*`. Its Java test dependencies are test-scoped; the frontend runtime remains HTML, CSS and JavaScript. Python is not required to build, run or verify this deployment.
 
 A manual walkthrough with a normal browser window and a private window also confirmed saved profiles, shared rooms, alternating turns, rejected moves, preserved historical participant names and continued play after restarting both Java services. Stopping and starting the game service preserved the recorded moves and allowed the players to reopen their room.
 

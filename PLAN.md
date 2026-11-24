@@ -8,21 +8,21 @@ Este documento se escribe en español por petición expresa del usuario. El cód
 
 ## 1. Punto de partida comprobado
 
-La referencia versionada es `424e30e`, ya subida con el alta y la baja de cuentas del paso 5.2. Este cambio completa el paso 5.3: authentication-service implementa login, consulta y logout, caducidad absoluta y por inactividad y comprobación de cuenta activa. Comparte la SQLite de cuentas con registro y cada servicio escribe solamente sus tablas. La verificación pasa 172 pruebas Java, incluidas 17 nuevas de autenticación y las cuatro de Docker. El reactor tiene seis módulos; Compose conserva NGINX y los dos servicios Java actuales, mientras registro y autenticación se ejecutan directamente, todavía sin conexión al tablero.
+Los tres primeros commits del bloque 5.4a están subidos: `d4671cf` para perfiles autenticados, `a12bcf2` para bajas y consultas de asociación y `4db73c5` para los clientes de cuentas. Esta entrega completa la conexión de permisos: game-service ofrece el adaptador público de cuentas, verifica la identidad para salas, movimientos y perfiles y bloquea las credenciales antiguas de invitados que ya tienen cuenta. Registro y autenticación están conectados en Compose con su base compartida. La verificación contiene 200 pruebas: 195 sin Docker y cinco de despliegue. Las pantallas de cuenta y su coordinación JavaScript siguen pendientes.
 
 | Elemento | Situación actual |
 | --- | --- |
 | `chess-core` | Modelo compartido y reglas del ajedrez, sin HTTP, JSON ni JDBC |
 | `game-service` | Salas, sesiones, movimientos y persistencia de salas y partidas en SQLite; puerto 8081 |
 | `player-service` | Identidades estables y operaciones sobre nombres de perfil; perfiles persistentes en SQLite; puerto 8082 |
-| Docker Compose | NGINX sirve el frontend y reenvía `/api` y `/games` a `game-service`; `player-service` resuelve perfiles en otro contenedor; un volumen propio por servicio Java y solo el puerto web publicado |
+| Docker Compose | NGINX y cuatro servicios Java; perfiles y partidas mantienen sus volúmenes y registro/autenticación comparten accounts-data con propiedad separada de las tablas |
 | Consul, salud y réplicas | Pendientes en 3.4 a 3.7; el despliegue actual usa DNS de Docker, una instancia de cada servicio y no ofrece `/health` |
 | `chess-frontend` | HTML, CSS, JavaScript y piezas SVG; no necesita un proceso Node.js |
 | Comunicación | Servidores Java con Javalin; JSON para crear y mover partidas; formularios todavía para unirse, refrescar y dejar de ver una sala |
 | Perfiles | Consulta y guardado explícito desde la interfaz mediante la API protegida; nombre de perfil separado del registrado en cada encuentro |
 | Historial | Movimientos persistentes y consulta de partida por código; todavía no hay una pantalla de listado de encuentros anteriores |
-| `register-service` | Altas y bajas por HTTP en el puerto directo 8083; cuentas y hashes en `.regalia/accounts.sqlite`; todavía sin contenedor ni rutas públicas en NGINX |
-| `authentication-service` | Login, consulta y logout en el puerto directo 8084; sesiones en la base compartida de cuentas, con caducidad y comprobación de cuenta activa; todavía sin conexión al tablero ni contenedor |
+| `register-service` | Altas, bajas y consulta privada de asociación; ejecutado en Compose y utilizado por el adaptador público de game-service |
+| `authentication-service` | Login, consulta y logout; ejecutado en Compose y utilizado para validar las operaciones de jugadores con cuenta |
 | Otros servicios | `matches-service` todavía no está implementado |
 | ActiveMQ | No está incorporado ni se ha confirmado como requisito obligatorio |
 
@@ -175,7 +175,7 @@ El contrato debe establecer quién conserva los asientos, cómo conoce `game-ser
 
 ### Fase 5. Registro y autenticación
 
-**Estado:** paso 5.1 guardado en `877f733` y paso 5.2 en `424e30e`, ambos subidos. El paso 5.3 está completado y verificado en este cambio. authentication-service tiene Main, servidor Javalin y AuthenticationUseCases, con puertos para leer credenciales, verificar contraseñas y gestionar sesiones y tokens. Sus 17 pruebas cubren dos clientes, identidad estable, reinicio, caducidad, bajas, fallos y sustitución de puertos. La suite completa pasa 172 pruebas, incluidas las cuatro de Docker. La conexión con la interfaz y los permisos del tablero sigue pendiente del 5.4.
+**Estado:** pasos 5.1 y 5.2 guardados en `877f733` y `424e30e`; paso 5.3 subido en `e4546f5`. El bloque 5.4a se ha dividido en cuatro commits revisables; esta entrega completa el último, tras los tres ya subidos. Incluye el adaptador público, los permisos de cuentas en salas y perfiles y el despliegue de los cuatro servicios Java por NGINX. Se adelantó este despliegue para que el servidor pudiera verificar las cuentas sin un modo alternativo que ignorase los servicios de seguridad. La interfaz HTML y JavaScript todavía no ofrece los controles de cuenta.
 
 Autenticación se ejecuta en el puerto 8084 y exige que registro haya inicializado .regalia/accounts.sqlite. Abre el archivo sin crearlo y añade solo authentication_sessions mediante authentication-schema.sql. Lee cuentas y contraseñas sin depender de las clases Java de register-service en producción: AccountCredentials es una proyección privada de lectura, no otra entidad Account ni otro perfil. Registro conserva las escrituras de cuentas, hashes y estado; autenticación solo escribe sesiones.
 
@@ -192,6 +192,15 @@ Las sesiones caducan a las ocho horas desde su creación o tras treinta minutos 
 | 5.3 | Implementar autenticación, cierre de sesión, caducidad y comprobación de cuenta activa | `Add account authentication and session lifecycle` |
 | 5.4 | Conectar la identidad verificada con las operaciones protegidas y añadir las pantallas necesarias | `Connect authenticated users to profiles and games` |
 
+El paso 5.4 se divide en dos bloques revisables:
+
+| Bloque | Trabajo y situación | Posible commit |
+| --- | --- | --- |
+| 5.4a | Adaptador público, cookies y CSRF, permisos de juego y perfiles y despliegue de los servicios de cuentas; completado localmente | `Connect authenticated sessions to game permissions` |
+| 5.4b | Controles de cuenta y recuperación de sesión en la interfaz; pendiente | `Connect account controls to the frontend` |
+
+Las pruebas del 5.4a verifican cuatro servicios HTTP separados y cinco contenedores temporales. Cubren registro sin aceptar actores declarados, cookies y tokens rotados, errores sin sobrescribir la sesión, inicio desde otro navegador, conservación de perfiles y nombres históricos, recuperación tras reiniciar, logout aunque falte la cookie de cuenta, caducidad, baja y rechazo de rutas antiguas con la credencial del invitado registrado. El volumen compartido de cuentas mantiene el mismo UID y cada servicio sigue escribiendo solamente sus tablas. Authentication-service puede reiniciarse durante el primer arranque hasta que registro haya inicializado el esquema; no se presenta esto como una comprobación de salud de kata 5.
+
 El nombre de acceso se distingue del nombre público: admite entre 3 y 40 caracteres ASCII, con letras, dígitos, punto, guion y guion bajo; se eliminan espacios exteriores y se guarda en minúsculas. No se ha elegido el correo electrónico como identificador de acceso. Cada cuenta recibe su propio identificador y referencia el `User.id` que `HttpPlayerIdentity` resuelve en el servicio de jugadores a partir de la credencial de invitado. Campos declarados como `id`, `playerId` o `status` no seleccionan el actor ni la asociación. El alta no copia el perfil ni cambia participantes históricos; el repositorio por sí solo no autentica al dueño de un identificador.
 
 El puerto inserta la cuenta y su hash en una transacción, consulta cuentas y hashes y guarda la baja de una cuenta activa. Insertar no actualiza ni reactiva una cuenta existente, y la unicidad de SQLite protege también el caso concurrente. Las cuentas inactivas conservan el nombre de acceso, la asociación y el hash. Para dar de baja se resuelve al jugador y se comprueba la contraseña antes de guardar el estado inactivo; la validación de cuenta activa en autenticación bloquea sus sesiones. `registerservice.Main` usa `.regalia/accounts.sqlite` por defecto, permite cambiar ruta, puerto, origen de jugadores y dirección de escucha, y cierra el cliente y el servidor al terminar. Las pruebas usan bases temporales.
@@ -206,9 +215,9 @@ Los identificadores públicos y los nombres se conservan en `player-service`. La
 
 Conservar el vínculo con las partidas del invitado al registrar su cuenta cuando se pueda demostrar que pertenece a la sesión actual. Una petición no podrá apropiarse de otro identificador. Cambiar de navegador después de iniciar sesión debe recuperar el mismo jugador, sin depender del UUID anónimo del navegador nuevo.
 
-La baja guarda el estado inactivo sin borrar partidas ni participantes. Autenticación comprueba ese estado en cada validación y bloquea todos los tokens desde su siguiente uso, también tras reiniciar el servicio. Las filas de sesiones inactivas pueden permanecer hasta el logout o la limpieza del próximo login, pero no autorizan acceso. El tablero todavía usa sesiones independientes de invitado: conectar sus permisos y evitar vías alternativas tras una baja o un logout corresponde al 5.4. La autenticación es distinta de cerrar o dejar de ver una sala y de la presencia de un participante.
+La baja conserva los participantes y movimientos históricos y hace que autenticación rechace todos los tokens de la cuenta. El adaptador público descarta la cookie de cuenta y crea un contexto de invitado nuevo, con otro identificador. Las credenciales antiguas del invitado registrado siguen bloqueadas, incluso después de reiniciar game-service, por una consulta de asociación en registro. Una sesión caducada o un servicio no disponible no se transforma silenciosamente en invitado. Consultar el desafío de login tampoco renueva la presencia de un actor no autorizado.
 
-La API actual de registro es interna: recibe la credencial de invitado como secreto de portador y solo se ejecuta directamente en loopback por defecto. NGINX no expone sus rutas y Compose todavía no incluye el servicio. Al conectarla al navegador en 5.4, el adaptador público debe obtener esa credencial desde la sesión del servidor y comprobar el token, como ya hace el perfil. No trasladar el campo `credential` al JavaScript del navegador ni presentarlo como una sesión de cuenta autenticada. Antes de introducir otras bibliotecas o técnicas no autorizadas, explicar la elección y consultar al usuario.
+Las API internas de registro, autenticación y perfiles autenticados siguen sin exponerse directamente por NGINX. Las rutas públicas viven en game-service: GET y POST y DELETE /api/session, POST /api/accounts y DELETE /api/accounts/current. El navegador solo envía datos de formulario y el token CSRF; el servidor obtiene las credenciales y los tokens autenticados de su contexto y cookies HttpOnly. Los servicios de jugadores y registro verifican también el bearer con autenticación para cargar o cambiar un perfil y dar de baja la cuenta. El identificador declarado en JSON no elige al actor.
 
 **Cierre:** altas duplicadas y credenciales inválidas se rechazan; el cierre y la baja invalidan el acceso; otro navegador recupera la identidad correcta; el historial anterior permanece consultable según la política de acceso acordada.
 
@@ -324,7 +333,7 @@ El plan se actualizará si cambia el enunciado o una comprobación revela otra d
 
 ## 8. Siguiente acción concreta
 
-Completado el paso 5.3, el siguiente trabajo es **el 5.4: conectar la identidad autenticada con perfiles, salas y partidas y añadir las pantallas correspondientes**. Dividirlo en cambios revisables: primero el adaptador público y los permisos, después los controles de registro, login, logout y baja y finalmente el despliegue de ambos servicios y la verificación por NGINX. Mantener los secretos fuera de URLs y almacenamiento JavaScript; el adaptador público gestionará la cookie y la protección de las escrituras. Una cuenta inactiva o una sesión rechazada no debe recuperar permisos mediante una ruta antigua o un cambio silencioso a invitado. Consul, /health, upstreams y réplicas siguen en 3.4 a 3.7, y la mejora pendiente de URL en 6.4.
+El último commit del bloque 5.4a es: **`Connect authenticated sessions to game permissions`**. El siguiente trabajo es **5.4b: añadir los controles de cuenta al frontend**, con el nombre propuesto **`Connect account controls to the frontend`**. Incluir registro, login, logout y baja, recuperar el estado de sesión y el nombre público y mostrar las restricciones por caducidad o baja sin perder el tablero ni el historial. El despliegue básico se adelantó al 5.4a para verificar los permisos con los servicios reales; después de la interfaz quedará el recorrido completo desde el navegador y su evidencia de entrega. Consul y las réplicas siguen pendientes en 3.4 a 3.7; las rutas antiguas de salas, en 6.4.
 
 La creación de este documento no implementa estas fases ni crea un commit.
 

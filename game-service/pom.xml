@@ -15,6 +15,18 @@
     <dependencies>
         <dependency>
             <groupId>software.ulpgc</groupId>
+            <artifactId>register-service</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.ulpgc</groupId>
+            <artifactId>authentication-service</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.ulpgc</groupId>
             <artifactId>player-service</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>

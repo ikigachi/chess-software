@@ -57,14 +57,17 @@ class GameHttpIntegrationTest {
         playerServer = createPlayerHttpServer(0);
         playerServer.start();
         playerIdentity = new HttpPlayerService(playerServer.uri());
-        BrowserSessions sessions = new BrowserSessions(playerIdentity, clock);
+        var accountServices = new GuestAccountServices();
+        var accountAccess = new AccountAccessUseCases(accountServices, accountServices);
+        BrowserSessions sessions = new BrowserSessions(playerIdentity, accountAccess, clock);
         rooms = new GetRoomUseCase(repository);
         RoomApiHandler api = new RoomApiHandler(new CreateRoomUseCase(repository), rooms,
                 new EnterRoomUseCase(rooms, new JoinRoomUseCase(repository)),
                 new MoveUseCase(repository), sessions, new RoomJsonCodec());
         server = new GameHttpServer(0, api,
                 new GameApiHandler(new CreateRoomUseCase(repository), rooms, new MoveUseCase(repository), sessions, new RoomJsonCodec()),
-                new PlayerProfileApiHandler(new PlayerProfileUseCases(playerIdentity, playerIdentity), sessions, new RoomJsonCodec()));
+                new PlayerProfileApiHandler(new PlayerProfileUseCases(playerIdentity, playerIdentity), sessions, new RoomJsonCodec()),
+                new BrowserAccountApiHandler(accountAccess, sessions));
         server.start();
     }
 

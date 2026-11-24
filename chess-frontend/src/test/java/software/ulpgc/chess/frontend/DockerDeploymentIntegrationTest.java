@@ -48,6 +48,7 @@ class DockerDeploymentIntegrationTest {
         runCompose("up", "-d", "--build");
         runCompose("exec", "-T", "nginx", "nginx", "-t");
         awaitGameService();
+        awaitAuthenticationService();
     }
 
     @AfterAll void stopIsolatedDeployment() throws Exception {
@@ -190,6 +191,76 @@ class DockerDeploymentIntegrationTest {
                 awaitGameService();
             }
         }
+    }
+
+    @Test void authenticatesAcrossContainersAndBlocksTheAccountAfterDeactivationWithoutChangingHistory() throws Exception {
+        try (var white = newBrowser(); var black = newBrowser(); var anotherBrowser = newBrowser()) {
+            var initial = loadState(white);
+            String initialToken = initial.get("token").getAsString();
+            String playerId = initial.getAsJsonObject("viewer").get("id").getAsString();
+            String code = readJsonResponse(sendJson(white, "/games", "POST", Map.of("token", initialToken,
+                    "name", "Historical account Alice")), 201).get("id").getAsString();
+            var blackState = loadState(black);
+            joinRoom(black, code, blackState.get("token").getAsString(), "Account opponent");
+            String username = "account-" + UUID.randomUUID().toString().substring(0, 8);
+            String password = "white knight on e4";
+            var registered = readJsonResponse(sendJson(white, "/api/accounts", "POST", Map.of(
+                    "token", initialToken, "username", username, "password", password)), 201);
+            assertTrue(registered.get("requiresLogin").getAsBoolean());
+            readJsonResponse(send(white, "/api/state", "GET", null), 401);
+            var loginResponse = sendJson(white, "/api/session", "POST", Map.of(
+                    "token", initialToken, "username", username, "password", password));
+            var signedIn = readJsonResponse(loginResponse, 201);
+            assertTrue(signedIn.get("authenticated").getAsBoolean());
+            assertEquals(playerId, signedIn.getAsJsonObject("viewer").get("id").getAsString());
+            assertTrue(loginResponse.headers().allValues("Set-Cookie").stream().allMatch(cookie ->
+                    cookie.contains("HttpOnly") && cookie.contains("SameSite=Lax")));
+            assertDoesNotThrow(() -> UUID.fromString(signedIn.get("token").getAsString()));
+            assertFalse(loginResponse.body().contains(password));
+            String token = signedIn.get("token").getAsString();
+            readJsonResponse(sendJson(white, "/api/profile", "PUT", Map.of("token", token, "name", "Account Alice")), 200);
+            recordMove(white, code, token, "e2", "e4");
+            recordMove(black, code, blackState.get("token").getAsString(), "e7", "e5");
+
+            var challenge = readJsonResponse(send(anotherBrowser, "/api/session", "GET", null), 200);
+            readJsonResponse(sendJson(anotherBrowser, "/api/session", "POST", Map.of("token", challenge.get("token").getAsString(),
+                    "username", username, "password", password)), 201);
+            runCompose("up", "-d", "--no-deps", "--force-recreate", "register-service", "authentication-service", "game-service");
+            awaitGameService();
+            awaitAuthenticationService();
+            var restored = readJsonResponse(send(anotherBrowser, "/api/session", "GET", null), 200);
+            assertTrue(restored.get("authenticated").getAsBoolean());
+            assertEquals(playerId, restored.getAsJsonObject("viewer").get("id").getAsString());
+            assertEquals("Account Alice", readJsonResponse(send(anotherBrowser, "/api/profile", "GET", null), 200)
+                    .getAsJsonObject("profile").get("name").getAsString());
+            recordMove(anotherBrowser, code, restored.get("token").getAsString(), "g1", "f3");
+            readJsonResponse(sendJson(anotherBrowser, "/api/accounts/current", "DELETE", Map.of(
+                    "token", restored.get("token").getAsString(), "password", password)), 200);
+            readJsonResponse(send(white, "/api/state", "GET", null), 401);
+            var recorded = readJsonResponse(send(white, "/games/" + code, "GET", null), 200).getAsJsonObject("room");
+            assertEquals(3, recorded.getAsJsonArray("moves").size());
+            assertEquals("Historical account Alice", recorded.getAsJsonObject("white").get("name").getAsString());
+            for (String internal : List.of("/accounts", "/sessions", "/players/current"))
+                assertEquals(404, send(white, internal, "GET", null).statusCode());
+        }
+    }
+
+    private void awaitAuthenticationService() throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(45).toNanos();
+        try (var browser = newBrowser()) {
+            while (System.nanoTime() < deadline) {
+                try {
+                    var challenge = send(browser, "/api/session", "GET", null);
+                    if (challenge.statusCode() == 200) {
+                        String token = readJsonResponse(challenge, 200).get("token").getAsString();
+                        if (sendJson(browser, "/api/session", "POST", Map.of("token", token, "username", "not-registered",
+                                "password", "a deliberately invalid password")).statusCode() == 401) return;
+                    }
+                } catch (java.io.IOException ignored) {}
+                Thread.sleep(200);
+            }
+        }
+        fail("The Docker authentication service did not become available. See " + logDirectory);
     }
 
     private Path findRepositoryRoot() {

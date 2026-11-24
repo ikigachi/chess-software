@@ -46,6 +46,8 @@ public final class RoomApiHandler implements Handler {
             RoomActionRequest request = RoomActionRequest.from(fields);
             Room room = action(session, request);
             snapshot(context, session, room, ApiMessages.success(request, room));
+        } catch (SecurityException exception) {
+            error(context, 401, "Sign in again to continue.", null);
         } catch (IllegalArgumentException exception) {
             error(context, 400, ApiMessages.error(exception.getMessage()), session);
         } catch (IllegalStateException exception) {

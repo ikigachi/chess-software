@@ -33,7 +33,8 @@ public final class PlayerProfileApiHandler implements Handler {
         try {
             User profile;
             if (context.method().equals(HandlerType.GET)) {
-                profile = profiles.loadPlayerProfile(session.user, session.credential);
+                profile = session.accountToken == null ? profiles.loadPlayerProfile(session.user, session.credential)
+                        : profiles.loadAccountProfile(session.user, session.accountToken);
             } else {
                 var request = readProfileUpdateRequest(context, session);
                 if (request == null) return;
@@ -41,11 +42,14 @@ public final class PlayerProfileApiHandler implements Handler {
                     sendErrorResponse(context, 403, ApiMessages.INVALID_TOKEN, session);
                     return;
                 }
-                profile = profiles.updatePlayerDisplayName(session.user, session.credential, request.name());
+                profile = session.accountToken == null ? profiles.updatePlayerDisplayName(session.user, session.credential, request.name())
+                        : profiles.updateAccountProfile(session.user, session.accountToken, request.name());
             }
             session.user = profile;
             sessions.markSessionActive(session);
             HttpResponses.json(context, 200, codec.serializePlayerProfile(profile, session.token));
+        } catch (SecurityException exception) {
+            sendErrorResponse(context, 401, "Sign in again to continue.", null);
         } catch (IllegalArgumentException exception) {
             sendErrorResponse(context, 400, exception.getMessage(), session);
         } catch (IllegalStateException exception) {

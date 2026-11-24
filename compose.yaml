@@ -14,8 +14,29 @@ services:
       target: game-service
     depends_on:
       - player-service
+      - register-service
+      - authentication-service
     volumes:
       - rooms-data:/data
+
+  register-service:
+    build:
+      context: .
+      target: register-service
+    depends_on:
+      - player-service
+    volumes:
+      - accounts-data:/data
+
+  authentication-service:
+    build:
+      context: .
+      target: authentication-service
+    depends_on:
+      - register-service
+    restart: on-failure
+    volumes:
+      - accounts-data:/data
 
   nginx:
     image: nginx:1.30.6-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a
@@ -33,3 +54,4 @@ services:
 volumes:
   players-data:
   rooms-data:
+  accounts-data:
