@@ -1,6 +1,6 @@
 # Plan de desarrollo de Regalia
 
-Fecha de revisión: 24 de noviembre de 2026.
+Fecha de revisión: 25 de noviembre de 2026.
 
 Este documento se escribe en español por petición expresa del usuario. El código, la interfaz y el README mantienen el inglés. Es una propuesta de trabajo: las fases pendientes no describen funcionalidades existentes ni autorizan automáticamente nuevas tecnologías o commits.
 
@@ -8,7 +8,7 @@ Este documento se escribe en español por petición expresa del usuario. El cód
 
 ## 1. Punto de partida comprobado
 
-Los tres primeros commits del bloque 5.4a están subidos: `d4671cf` para perfiles autenticados, `a12bcf2` para bajas y consultas de asociación y `4db73c5` para los clientes de cuentas. El cuarto commit, `c6b76bf`, completa la conexión de permisos y está subido: game-service ofrece el adaptador público de cuentas, verifica la identidad para salas, movimientos y perfiles y bloquea las credenciales antiguas de invitados que ya tienen cuenta. Registro y autenticación están conectados en Compose con su base compartida. Los controles de cuenta del 5.4b están subidos en `209357b`, verificados con 13 pruebas JavaScript y un recorrido real del navegador. Esta entrega completa el paso 6.1 con el commit `Add match queries through application ports`: matches-service consulta encuentros por código mediante GameReader y un adaptador HTTP hacia game-service; no tiene almacenamiento propio ni rutas de escritura. La suite Java contiene 213 pruebas: 208 sin Docker y cinco de despliegue.
+Los tres primeros commits del bloque 5.4a están subidos: `d4671cf` para perfiles autenticados, `a12bcf2` para bajas y consultas de asociación y `4db73c5` para los clientes de cuentas. El cuarto commit, `c6b76bf`, completa la conexión de permisos y está subido: game-service ofrece el adaptador público de cuentas, verifica la identidad para salas, movimientos y perfiles y bloquea las credenciales antiguas de invitados que ya tienen cuenta. Registro y autenticación están conectados en Compose con su base compartida. Los controles de cuenta del 5.4b están subidos en `209357b`, verificados con 13 pruebas JavaScript y un recorrido real del navegador. El paso 6.1 está subido en `742795f`, `Add match queries through application ports`: matches-service consulta encuentros por código mediante GameReader y un adaptador HTTP hacia game-service; no tiene almacenamiento propio ni rutas de escritura. Esta entrega completa la base de creación reintentable del paso 6.2a con el commit `Add retry-safe room creation`: RoomCreationStore conserva la solicitud original y crea sala y clave en una misma transacción. La suite Java contiene 219 pruebas: 214 sin Docker y cinco de despliegue; estas últimas no se han ejecutado para este bloque.
 
 | Elemento | Situación actual |
 | --- | --- |
@@ -223,7 +223,7 @@ Las API internas de registro, autenticación y perfiles autenticados siguen sin 
 
 ### Fase 6. Extraer `matches-service`
 
-**Estado:** 6.1 completado y verificado en esta entrega. GET /matches/{code} consulta los participantes históricos y el resumen de la partida mediante GameReader, sin duplicar almacenamiento ni escrituras. El Main usa el puerto 8085 y puede consultar el game-service directo o a través del NGINX actual. Las fechas y el listado por jugador siguen en fases posteriores; creación y unión continúan en game-service.
+**Estado:** 6.1 subido en `742795f`. Esta entrega completa y verifica el 6.2a. GET /matches/{code} consulta los participantes históricos y el resumen de la partida mediante GameReader, sin duplicar almacenamiento ni escrituras. El Main usa el puerto 8085 y puede consultar el game-service directo o a través del NGINX actual. Las fechas y el listado por jugador siguen en fases posteriores; creación y unión continúan en game-service.
 
 **Objetivo:** que la coordinación de encuentros se ejecute en su servicio y que `game-service` conserve las reglas y los movimientos autoritativos.
 
@@ -233,6 +233,8 @@ Las API internas de registro, autenticación y perfiles autenticados siguen sin 
 | 6.2 | Migrar la creación y unión a salas mediante operaciones recuperables | `Move room creation and joining to matches-service` |
 | 6.3 | Conectar los servicios y el frontend y retirar la coordinación antigua cuando se verifique la migración | `Route room coordination through matches-service` |
 | 6.4 | Sustituir las acciones genéricas restantes por rutas y cuerpos JSON que expresen salas, participantes y sala vista; actualizar frontend, NGINX y pruebas antes de retirar rutas heredadas | `Replace legacy room actions with resource routes` |
+
+El paso 6.2 se divide en cambios pequeños. El primer bloque, **6.2a**, añade únicamente el contrato RoomCreationStore, el caso CreateRoomOnceUseCase y su implementación en memoria y SQLite. La misma clave y los mismos datos recuperan la sala actual sin reiniciar sus movimientos; los conflictos no cambian datos y un fallo de la segunda escritura revierte la primera. El siguiente bloque conectará un llamador HTTP con identidad verificada y reintentos; todavía no se ha modificado POST /games, el frontend ni matches-service para esta creación.
 
 Primero se puede extraer una consulta para comprobar el contrato y el proceso independiente. No se declarará completada la separación mientras las escrituras sigan en el servicio anterior.
 
@@ -335,7 +337,7 @@ El plan se actualizará si cambia el enunciado o una comprobación revela otra d
 
 ## 8. Siguiente acción concreta
 
-Los pasos 5.4a y 5.4b están subidos hasta `209357b`. El paso 6.1 se completa en esta entrega con el commit **`Add match queries through application ports`**. Se han verificado la lectura por código, los datos históricos, la distinción entre código e identificador de partida, los fallos externos, el límite de respuesta y el timeout del cuerpo completo. Una prueba arranca el Main en otro proceso Java y las consultas con disparadores SQLite que rechazan escrituras conservan sala y movimientos. Compose y el frontend todavía no utilizan el nuevo servicio. El siguiente desarrollo es **6.2**, dividido primero en un contrato pequeño de creación recuperable con clave estable de operación; la creación y la unión no deben trasladarse juntas en un único cambio grande. La implementación se comprobará antes de conectar escrituras entre servicios. Consul y réplicas siguen pendientes en 3.4 a 3.7 y las rutas antiguas, en 6.4.
+El paso 6.1 está subido en `742795f`. El bloque 6.2a se completa en esta entrega con el commit **`Add retry-safe room creation`**. Incluye solo la base de almacenamiento y aplicación, con seis pruebas nuevas de equivalencia de adaptadores, conflictos sin cambios parciales, claves persistentes, conservación de partidas anteriores, reintentos simultáneos y rollback. La API y el frontend todavía no utilizan este camino. El próximo bloque conectará una petición HTTP con actor verificado y una solicitud estable que pueda repetirse sin duplicar la sala. La creación y la unión se seguirán trasladando por separado a matches-service; no se activan réplicas ni se reparten las escrituras en este cambio.
 
 La creación de este documento no implementa estas fases ni crea un commit.
 

@@ -446,6 +446,20 @@ These contracts describe the current application and the constraints for separat
 | Query viewer state | `/api/state` returns the selected room or a board preview, and manages the browser session and presence. | This operation can initialize a session; it does not create a room, record a move or perform hidden room recovery. |
 | Update profile | An active session, its token and a valid name select the session's player profile. A valid service response refreshes that session's cached name. | Identity and historical participants remain unchanged. A lost acknowledgement may follow a successful remote write; query `/api/profile` before another attempt rather than claiming that the remote write was rolled back. |
 
+`CreateRoomOnceUseCase` provides an application-level creation path through the atomic `RoomCreationStore`
+port. Its immutable `RoomCreation` contains an exact operation key of 1–128 characters and the initial waiting
+room. The original payload includes the room code, game identifier and recorded creator identifier and name.
+Repeating the same key and payload returns the current room, including any opponent and moves already recorded.
+A different payload or another key for an occupied code is rejected without changing rooms or consuming the key.
+
+Both room adapters implement this contract. SQLite stores the original request in `room_creations`, added by
+`schema.sql`, and commits it with the initial room. A failed key write rolls back the room insert. The first
+statement inserts the room only if absent, acquiring the write lock before reading the creation key; concurrent
+retries cannot overwrite existing history. Keys survive a restart, while the memory adapter retains them only
+for its own lifetime. Legacy rooms cannot be claimed by supplying a new key. This does not coordinate concurrent
+moves across service replicas. No HTTP route, frontend control or matches-service write uses this path yet;
+public `POST /games` still has no retry-key contract. The next change will connect a verified HTTP caller.
+
 `RoomRepository.save` is currently the persistence boundary for both the room and its complete move history. SQLite commits these values together and rolls back a failed write. `Main` injects that repository into the use cases. The HTTP server serializes operations within one process; the repository port currently provides no compare-and-set version or multi-process coordination guarantee. Running more game-service replicas therefore requires additional session and concurrency work.
 
 Examples checked by the current contracts:
@@ -515,7 +529,7 @@ Run the Java checks that do not require Docker from the repository root:
 mvn test
 ```
 
-The Java suites contain 213 cases: 208 without Docker and five opt-in deployment checks. The new coverage includes eight public account-permission HTTP scenarios against the four independent services and a malformed account-response adapter check. They cover registration, cookie and CSRF handling, historical identity and names, login in another browser, restart recovery, logout with a missing account cookie, expiry, deactivation, legacy-route bypass attempts, failed dependencies and rejected writes. The five Docker checks cover frontend assets, proxy contracts, guest recovery, service failures and account login/profile/history recovery after recreating account and game containers. The existing 33 direct game API cases, 32 registration cases, 17 authentication cases, chess rules and repository contracts remain in the suite.
+The Java suites contain 219 cases: 214 without Docker and five opt-in deployment checks. This change passed the non-Docker checks; the five deployment checks were skipped. Six added creation checks cover both adapters, conflicting requests, distinct game identifiers, retained history, concurrent retries, additive schema initialization, restart recovery and transaction rollback. The new coverage includes eight public account-permission HTTP scenarios against the four independent services and a malformed account-response adapter check. They cover registration, cookie and CSRF handling, historical identity and names, login in another browser, restart recovery, logout with a missing account cookie, expiry, deactivation, legacy-route bypass attempts, failed dependencies and rejected writes. The five Docker checks cover frontend assets, proxy contracts, guest recovery, service failures and account login/profile/history recovery after recreating account and game containers. The existing 33 direct game API cases, 32 registration cases, 17 authentication cases, chess rules and repository contracts remain in the suite.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 

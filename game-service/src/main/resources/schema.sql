@@ -20,4 +20,12 @@ CREATE TABLE IF NOT EXISTS moves (
     PRIMARY KEY (room_code, ply)
 );
 
+CREATE TABLE IF NOT EXISTS room_creations (
+    operation_key TEXT PRIMARY KEY NOT NULL CHECK (length(trim(operation_key)) BETWEEN 1 AND 128),
+    room_code TEXT NOT NULL UNIQUE REFERENCES rooms(code),
+    game_id TEXT NOT NULL,
+    creator_id TEXT NOT NULL,
+    creator_name TEXT NOT NULL
+);
+
 COMMIT;
