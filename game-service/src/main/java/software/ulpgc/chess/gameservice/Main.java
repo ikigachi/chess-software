@@ -1,7 +1,6 @@
 package software.ulpgc.chess.gameservice;
 
 import software.ulpgc.chess.gameservice.infrastructure.adapters.*;
-import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
 import software.ulpgc.chess.gameservice.application.usecases.*;
 import software.ulpgc.chess.gameservice.infrastructure.http.RoomJsonCodec;
 
@@ -13,7 +12,7 @@ public class Main {
         int port = args.length > 0 ? Integer.parseInt(args[0]) : 8081;
         SqliteDatabase database = new SqliteDatabase(Path.of(args.length > 1 ? args[1] : ".regalia/rooms.sqlite"));
         database.initialize();
-        RoomRepository repository = new SqliteRoomRepository(database);
+        var repository = new SqliteRoomRepository(database);
         GetRoomUseCase get = new GetRoomUseCase(repository);
         EnterRoomUseCase enter = new EnterRoomUseCase(get, new JoinRoomUseCase(repository));
         RoomJsonCodec codec = new RoomJsonCodec();
@@ -27,7 +26,8 @@ public class Main {
             BrowserSessions sessions = new BrowserSessions(players, accountAccess);
             RoomApiHandler api = new RoomApiHandler(create, get, enter, move, sessions, codec);
             var profiles = new PlayerProfileApiHandler(new PlayerProfileUseCases(players, players, players), sessions, codec);
-            GameHttpServer server = new GameHttpServer(port, api, new GameApiHandler(create, get, move, sessions, codec), profiles,
+            GameHttpServer server = new GameHttpServer(port, api,
+                    new GameApiHandler(create, new CreateRoomOnceUseCase(repository), get, move, sessions, codec), profiles,
                     new BrowserAccountApiHandler(accountAccess, sessions));
             try {
                 server.start(args.length > 3 ? args[3] : "127.0.0.1");

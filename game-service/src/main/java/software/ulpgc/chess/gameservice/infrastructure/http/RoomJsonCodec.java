@@ -17,7 +17,11 @@ public final class RoomJsonCodec {
 
     public CreateRequest createRequest(String json) {
         JsonObject fields = parseJsonObject(json);
-        return new CreateRequest(readOptionalString(fields, "name"), readOptionalString(fields, "token"));
+        String operationKey = readOptionalString(fields, "operationKey");
+        if (fields.has("operationKey") && operationKey == null)
+            throw new IllegalArgumentException("Expected a string for operationKey.");
+        return new CreateRequest(readOptionalString(fields, "name"), readOptionalString(fields, "token"),
+                operationKey, operationKey == null ? null : readOptionalString(fields, "code"));
     }
 
     public MoveRequest moveRequest(String json) {
@@ -49,7 +53,7 @@ public final class RoomJsonCodec {
         return value.getAsString();
     }
 
-    public record CreateRequest(String name, String token) {}
+    public record CreateRequest(String name, String token, String operationKey, String code) {}
     public record MoveRequest(String from, String to, String promotion, String token) {}
     public record UpdatePlayerProfileRequest(String name, String token) {}
 

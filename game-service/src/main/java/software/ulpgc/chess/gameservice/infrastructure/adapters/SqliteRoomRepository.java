@@ -4,6 +4,7 @@ import software.ulpgc.chess.application.domain.model.*;
 import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
 import software.ulpgc.chess.gameservice.application.ports.RoomCreationStore;
 import software.ulpgc.chess.gameservice.application.domain.model.RoomCreation;
+import software.ulpgc.chess.gameservice.application.domain.model.RoomCreationConflictException;
 
 import java.sql.*;
 import java.util.Objects;
@@ -78,10 +79,10 @@ public final class SqliteRoomRepository implements RoomRepository, RoomCreationS
                 Room result;
                 if (previous.isPresent()) {
                     if (!previous.orElseThrow().equals(creation))
-                        throw new IllegalArgumentException("Creation key was already used for a different request.");
+                        throw new RoomCreationConflictException("Creation key was already used for a different request.");
                     result = readCreatedRoom(connection, creation);
                 } else {
-                    if (!inserted) throw new IllegalArgumentException("Room already exists: " + creation.room().code());
+                    if (!inserted) throw new RoomCreationConflictException("Room already exists: " + creation.room().code());
                     saveCreation(connection, creation);
                     result = creation.room();
                 }

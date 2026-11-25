@@ -56,7 +56,7 @@ class MatchesHttpIntegrationTest {
         var unusedAccounts = new UnusedAccountServices();
         var sessions = new BrowserSessions(credential -> { throw new AssertionError("A query resolved a guest."); },
                 new AccountAccessUseCases(unusedAccounts, unusedAccounts));
-        var handler = new GameApiHandler(new CreateRoomUseCase(repository), new GetRoomUseCase(repository),
+        var handler = new GameApiHandler(new CreateRoomUseCase(repository), new CreateRoomOnceUseCase(repository), new GetRoomUseCase(repository),
                 new MoveUseCase(repository), sessions, new RoomJsonCodec());
         source = Javalin.create(config -> config.routes.get("/games/{id}", handler::retrieve)).start("127.0.0.1", 0);
         games = new HttpGameReader(URI.create("http://127.0.0.1:" + source.port()));

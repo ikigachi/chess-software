@@ -4,6 +4,7 @@ import software.ulpgc.chess.application.domain.model.Room;
 import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
 import software.ulpgc.chess.gameservice.application.ports.RoomCreationStore;
 import software.ulpgc.chess.gameservice.application.domain.model.RoomCreation;
+import software.ulpgc.chess.gameservice.application.domain.model.RoomCreationConflictException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -32,13 +33,13 @@ public class InMemoryRoomRepository implements RoomRepository, RoomCreationStore
         RoomCreation previous = creations.get(creation.operationKey());
         if (previous != null) {
             if (!previous.equals(creation))
-                throw new IllegalArgumentException("Creation key was already used for a different request.");
+                throw new RoomCreationConflictException("Creation key was already used for a different request.");
             Room stored = rooms.get(previous.room().code());
             creation.validateStoredRoom(stored);
             return stored;
         }
         if (rooms.containsKey(creation.room().code()))
-            throw new IllegalArgumentException("Room already exists: " + creation.room().code());
+            throw new RoomCreationConflictException("Room already exists: " + creation.room().code());
         rooms.put(creation.room().code(), creation.room());
         creations.put(creation.operationKey(), creation);
         return creation.room();

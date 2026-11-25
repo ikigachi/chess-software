@@ -4,6 +4,8 @@ import io.javalin.http.Context;
 import software.ulpgc.chess.application.domain.model.Room;
 import software.ulpgc.chess.application.domain.model.User;
 import software.ulpgc.chess.gameservice.application.usecases.CreateRoomUseCase;
+import software.ulpgc.chess.gameservice.application.usecases.CreateRoomOnceUseCase;
+import software.ulpgc.chess.gameservice.application.domain.model.RoomCreationConflictException;
 import software.ulpgc.chess.gameservice.application.usecases.GetRoomUseCase;
 import software.ulpgc.chess.gameservice.application.usecases.MoveUseCase;
 import software.ulpgc.chess.gameservice.infrastructure.http.ApiMessages;
@@ -18,14 +20,16 @@ import java.util.Objects;
 
 public final class GameApiHandler {
     private final CreateRoomUseCase create;
+    private final CreateRoomOnceUseCase createOnce;
     private final GetRoomUseCase get;
     private final MoveUseCase move;
     private final BrowserSessions sessions;
     private final RoomJsonCodec codec;
 
-    public GameApiHandler(CreateRoomUseCase create, GetRoomUseCase get, MoveUseCase move,
+    public GameApiHandler(CreateRoomUseCase create, CreateRoomOnceUseCase createOnce, GetRoomUseCase get, MoveUseCase move,
                           BrowserSessions sessions, RoomJsonCodec codec) {
         this.create = Objects.requireNonNull(create);
+        this.createOnce = Objects.requireNonNull(createOnce);
         this.get = Objects.requireNonNull(get);
         this.move = Objects.requireNonNull(move);
         this.sessions = Objects.requireNonNull(sessions);
@@ -55,10 +59,17 @@ public final class GameApiHandler {
         }
         String name = new RoomActionRequest("create", request.name(), null, null).name();
         User user = new User(session.user.id(), name);
-        Room room = create.execute(user);
+        Room room;
+        try {
+            room = request.operationKey() == null ? create.execute(user)
+                    : createOnce.execute(request.operationKey(), normalizeCreationCode(request.code()), user);
+        } catch (RoomCreationConflictException exception) {
+            error(context, 409, exception.getMessage());
+            return;
+        }
         session.user = user;
         session.code = room.code();
-        context.header("Location", "/games/" + room.game().id());
+        context.header("Location", "/games/" + room.code());
         HttpResponses.json(context, 201, codec.game(room));
     }
 
@@ -82,6 +93,13 @@ public final class GameApiHandler {
             return;
         }
         HttpResponses.json(context, 200, codec.game(room));
+    }
+
+    private String normalizeCreationCode(String code) {
+        String normalized = code == null ? "" : code.strip().toUpperCase(Locale.ROOT);
+        if (!normalized.matches("[A-Z0-9_-]{1,30}"))
+            throw new IllegalArgumentException("Use a room code of 1-30 letters, digits, hyphens or underscores.");
+        return normalized;
     }
 
     private String jsonBody(Context context) throws IOException {

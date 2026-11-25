@@ -439,7 +439,7 @@ These contracts describe the current application and the constraints for separat
 
 | Operation | Preconditions and result | Rejection and failure guarantees |
 | --- | --- | --- |
-| Create | A valid creator and an unused room code produce a waiting room and initial game in one local save. | Invalid input or an explicit duplicate code leaves existing rooms unchanged. The current public `POST /games` generates a code; it has no retry key and must not be described as idempotent. |
+| Create | A valid creator and an unused room code produce a waiting room and initial game in one local save. | Invalid input leaves existing rooms unchanged. Without an operation key, public `POST /games` generates a code and creates a new room for each accepted request. Its optional keyed mode is described below. |
 | Enter or reopen | A non-member can take the free Black seat. `EnterRoomUseCase` returns the existing room for an already seated identifier, even if its current profile name differs. | A third player or missing room is rejected without assigning a seat or changing the game. Direct `Room.join` remains stricter and rejects an identifier already seated. |
 | Move | The acting identifier must occupy a seat, both players must be present in the room model, its color must have the turn and the move must satisfy the chess rules. | A rejected move preserves participants, position, turn and history. Possessing a room code or a valid token for another session does not authorize a move. Online presence is not an additional chess permission. |
 | Query a game | `GET /games/{id}` returns the game for a known code without joining, creating a session or changing the viewer's selected room. | A missing game returns `404` and does not create one. The current read policy allows anyone with the code to consult this endpoint; changing that policy belongs to the account and history work. |
@@ -457,8 +457,29 @@ Both room adapters implement this contract. SQLite stores the original request i
 statement inserts the room only if absent, acquiring the write lock before reading the creation key; concurrent
 retries cannot overwrite existing history. Keys survive a restart, while the memory adapter retains them only
 for its own lifetime. Legacy rooms cannot be claimed by supplying a new key. This does not coordinate concurrent
-moves across service replicas. No HTTP route, frontend control or matches-service write uses this path yet;
-public `POST /games` still has no retry-key contract. The next change will connect a verified HTTP caller.
+moves across service replicas. Public POST /games now exposes this path with an optional operation key;
+the frontend and matches-service do not submit keyed creation requests yet.
+
+For retryable HTTP creation, send `POST /games` with JSON such as:
+
+```json
+{ "name": "Alice", "token": "current-csrf-token", "operationKey": "unique-creation-request", "code": "ABC123" }
+```
+
+Keep the same operation key, room code and encounter name when retrying. The operation key is exact and
+case-sensitive, contains 1-128 characters and cannot be blank or null. The code uses 1-30 letters, digits,
+hyphens or underscores; it is trimmed and converted to uppercase. The actor comes from the verified browser
+session. Supplied player identifiers cannot choose another actor. The normal JSON, body-size and CSRF checks
+still apply. After signing in again, use the current CSRF token with the original creation fields.
+
+The initial request and an accepted retry return `201`, the same `Location` and the current game response,
+including any participants and moves recorded since creation. A changed payload, another actor using the key,
+or an occupied code belonging to a different creation returns `409`. Invalid creation fields return `400`,
+invalid CSRF tokens `403`, expired account sessions `401` and unavailable storage `503`. Rejected requests
+preserve the selected room, viewer name and existing game. A failed key write also removes its room insert,
+allowing the same operation to be retried later. With no operationKey field, the original generated-code
+behavior remains available; such requests are separate creations. The browser controls will be connected in
+a later change.
 
 `RoomRepository.save` is currently the persistence boundary for both the room and its complete move history. SQLite commits these values together and rolls back a failed write. `Main` injects that repository into the use cases. The HTTP server serializes operations within one process; the repository port currently provides no compare-and-set version or multi-process coordination guarantee. Running more game-service replicas therefore requires additional session and concurrency work.
 
@@ -529,7 +550,7 @@ Run the Java checks that do not require Docker from the repository root:
 mvn test
 ```
 
-The Java suites contain 219 cases: 214 without Docker and five opt-in deployment checks. This change passed the non-Docker checks; the five deployment checks were skipped. Six added creation checks cover both adapters, conflicting requests, distinct game identifiers, retained history, concurrent retries, additive schema initialization, restart recovery and transaction rollback. The new coverage includes eight public account-permission HTTP scenarios against the four independent services and a malformed account-response adapter check. They cover registration, cookie and CSRF handling, historical identity and names, login in another browser, restart recovery, logout with a missing account cookie, expiry, deactivation, legacy-route bypass attempts, failed dependencies and rejected writes. The five Docker checks cover frontend assets, proxy contracts, guest recovery, service failures and account login/profile/history recovery after recreating account and game containers. The existing 33 direct game API cases, 32 registration cases, 17 authentication cases, chess rules and repository contracts remain in the suite.
+The Java suites contain 223 cases: 218 without Docker and five opt-in deployment checks. All passed in this verification. Four added HTTP cases cover keyed creation, preserved history and session state, storage failure and restart recovery, another browser using the same account and expired-account rejection. Six added creation checks cover both adapters, conflicting requests, distinct game identifiers, retained history, concurrent retries, additive schema initialization, restart recovery and transaction rollback. The new coverage includes nine public account-permission HTTP scenarios against the four independent services and a malformed account-response adapter check. They cover registration, cookie and CSRF handling, historical identity and names, login in another browser, restart recovery, logout with a missing account cookie, expiry, deactivation, legacy-route bypass attempts, failed dependencies and rejected writes. The five Docker checks cover frontend assets, proxy contracts, guest recovery, service failures and account login/profile/history recovery after recreating account and game containers. The existing 36 direct game API cases, 32 registration cases, 17 authentication cases, chess rules and repository contracts remain in the suite.
 
 To verify the disconnection notice, set one browser window to Offline in its developer tools. Wait for the other player to see the notice, then restore the connection. Both players can continue with the same turn and move history.
 

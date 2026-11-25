@@ -9,6 +9,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import software.ulpgc.chess.application.domain.model.*;
 import software.ulpgc.chess.gameservice.application.ports.RoomRepository;
+import software.ulpgc.chess.gameservice.application.ports.RoomCreationStore;
 import software.ulpgc.chess.gameservice.application.usecases.*;
 import software.ulpgc.chess.gameservice.infrastructure.adapters.*;
 import software.ulpgc.chess.gameservice.infrastructure.http.*;
@@ -49,11 +50,11 @@ class GameHttpIntegrationTest {
         start(new InMemoryRoomRepository());
     }
 
-    private void start(RoomRepository repository) throws Exception {
+    private <R extends RoomRepository & RoomCreationStore> void start(R repository) throws Exception {
         start(repository, Clock.systemUTC());
     }
 
-    private void start(RoomRepository repository, Clock clock) throws Exception {
+    private <R extends RoomRepository & RoomCreationStore> void start(R repository, Clock clock) throws Exception {
         playerServer = createPlayerHttpServer(0);
         playerServer.start();
         playerIdentity = new HttpPlayerService(playerServer.uri());
@@ -65,7 +66,8 @@ class GameHttpIntegrationTest {
                 new EnterRoomUseCase(rooms, new JoinRoomUseCase(repository)),
                 new MoveUseCase(repository), sessions, new RoomJsonCodec());
         server = new GameHttpServer(0, api,
-                new GameApiHandler(new CreateRoomUseCase(repository), rooms, new MoveUseCase(repository), sessions, new RoomJsonCodec()),
+                new GameApiHandler(new CreateRoomUseCase(repository), new CreateRoomOnceUseCase(repository), rooms,
+                        new MoveUseCase(repository), sessions, new RoomJsonCodec()),
                 new PlayerProfileApiHandler(new PlayerProfileUseCases(playerIdentity, playerIdentity), sessions, new RoomJsonCodec()),
                 new BrowserAccountApiHandler(accountAccess, sessions));
         server.start();
@@ -124,6 +126,13 @@ class GameHttpIntegrationTest {
         JsonObject request = new JsonObject();
         request.addProperty("name", name);
         request.addProperty("token", token);
+        return postGame(client, request.toString());
+    }
+
+    private HttpResponse<String> createGameOnce(HttpClient client, String token, String key, String code, String name) throws Exception {
+        JsonObject request = new JsonObject();
+        Map.of("token", token, "operationKey", key, "name", name).forEach(request::addProperty);
+        request.addProperty("code", code);
         return postGame(client, request.toString());
     }
 
@@ -525,6 +534,87 @@ class GameHttpIntegrationTest {
         }
         assertEquals(original, data(get(white, "/api/state")));
         assertSame(saved, rooms.execute(code));
+    }
+
+    @Test void keyedCreationReturnsTheSameLocationAndCurrentHistoryWithoutAcceptingAnotherActor() throws Exception {
+        String whiteToken = token(white);
+        String blackToken = token(black);
+        var first = createGameOnce(white, whiteToken, "creation-1", " key001 ", "Alice");
+        assertEquals(201, first.statusCode());
+        assertEquals("/games/KEY001", first.headers().firstValue("Location").orElseThrow());
+        assertEquals(data(get(white, "/api/state")).getAsJsonObject("viewer").get("id"),
+                data(first).getAsJsonObject("room").getAsJsonObject("white").get("id"));
+        assertEquals(200, post(black, Map.of("action", "join", "token", blackToken, "code", "KEY001", "name", "Bob")).statusCode());
+        assertEquals(200, move(white, whiteToken, "e2", "e4").statusCode());
+        var saved = rooms.execute("KEY001");
+
+        var repeated = createGameOnce(white, whiteToken, "creation-1", "KEY001", " Alice ");
+
+        assertEquals(201, repeated.statusCode());
+        assertEquals(first.headers().firstValue("Location"), repeated.headers().firstValue("Location"));
+        assertEquals(1, data(repeated).getAsJsonObject("room").getAsJsonArray("moves").size());
+        assertEquals(409, createGameOnce(black, blackToken, "creation-1", "KEY001", "Alice").statusCode());
+        assertEquals(409, createGameOnce(white, whiteToken, "creation-1", "KEY002", "Alice").statusCode());
+        assertEquals(409, createGameOnce(white, whiteToken, "creation-1", "KEY001", "Renamed").statusCode());
+        assertEquals(saved, rooms.execute("KEY001"));
+        assertEquals(404, get(white, "/games/KEY002").statusCode());
+    }
+
+    @Test void rejectedKeyedCreationPreservesTheSelectedRoomAndItsToken() throws Exception {
+        String token = token(white);
+        assertEquals(201, createGame(white, token, "Original").statusCode());
+        var before = data(get(white, "/api/state"));
+        String existingCode = before.getAsJsonObject("room").get("code").getAsString();
+        for (String key : List.of("", " ", "x".repeat(129)))
+            assertEquals(400, createGameOnce(white, token, key, "KEY002", "Rejected").statusCode());
+        for (String code : new String[] {null, "", " ", "x".repeat(31), "A/B", "A B", "A?B"})
+            assertEquals(400, createGameOnce(white, token, "creation-2", code, "Rejected").statusCode());
+        assertEquals(403, createGameOnce(white, "wrong", "creation-2", "KEY002", "Rejected").statusCode());
+        assertEquals(409, createGameOnce(white, token, "creation-2", existingCode, "Rejected").statusCode());
+        for (String invalid : List.of("{\"operationKey\":12}", "{\"operationKey\":null}",
+                "{\"operationKey\":\"creation-2\",\"code\":12}"))
+            assertEquals(400, postGame(white, invalid).statusCode());
+        assertEquals(before, data(get(white, "/api/state")));
+        assertEquals(404, get(white, "/games/KEY002").statusCode());
+        var withoutKey = new JsonObject();
+        withoutKey.addProperty("token", token);
+        withoutKey.addProperty("name", "Another");
+        withoutKey.addProperty("code", 42);
+        var generated = postGame(white, withoutKey.toString());
+        assertEquals(201, generated.statusCode());
+        assertTrue(data(generated).get("id").getAsString().matches("[A-F0-9]{6}"));
+    }
+
+    @Test void keyedCreationRecoversAfterStorageFailureAndServerRestart(@TempDir Path directory) throws Exception {
+        stop();
+        var database = new SqliteDatabase(directory.resolve("rooms.sqlite"));
+        database.initialize();
+        start(new SqliteRoomRepository(database));
+        String token = token(white);
+        assertEquals(201, createGameOnce(white, token, "persistent-key", "KEY001", "Alice").statusCode());
+        String blackToken = token(black);
+        assertEquals(200, post(black, Map.of("action", "join", "token", blackToken, "code", "KEY001", "name", "Bob")).statusCode());
+        assertEquals(200, move(white, token, "e2", "e4").statusCode());
+        var before = data(get(white, "/api/state"));
+        try (var connection = database.openConnection(); var statement = connection.createStatement()) {
+            statement.executeUpdate("""
+                    CREATE TRIGGER reject_creation BEFORE INSERT ON room_creations
+                    BEGIN SELECT RAISE(ABORT, 'Test creation failure'); END
+                    """);
+        }
+        assertEquals(503, createGameOnce(white, token, "failed-key", "KEY002", "Rejected").statusCode());
+        assertEquals(before, data(get(white, "/api/state")));
+        assertEquals(404, get(white, "/games/KEY002").statusCode());
+        try (var connection = database.openConnection(); var statement = connection.createStatement()) {
+            statement.executeUpdate("DROP TRIGGER reject_creation");
+        }
+        stop();
+        start(new SqliteRoomRepository(database));
+        String restoredToken = token(white);
+        var restored = createGameOnce(white, restoredToken, "persistent-key", "KEY001", "Alice");
+        assertEquals(201, restored.statusCode());
+        assertEquals(1, data(restored).getAsJsonObject("room").getAsJsonArray("moves").size());
+        assertEquals(201, createGameOnce(white, restoredToken, "failed-key", "KEY002", "Alice").statusCode());
     }
 
     @Test void gameCreationRequiresJsonAndLimitsTheRequestBody() throws Exception {

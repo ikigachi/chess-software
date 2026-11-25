@@ -89,7 +89,7 @@ class AccountPermissionsHttpTest {
         var get = new GetRoomUseCase(rooms);
         var move = new MoveUseCase(rooms);
         var api = new RoomApiHandler(create, get, new EnterRoomUseCase(get, new JoinRoomUseCase(rooms)), move, sessions, codec);
-        game = new GameHttpServer(0, api, new GameApiHandler(create, get, move, sessions, codec),
+        game = new GameHttpServer(0, api, new GameApiHandler(create, new CreateRoomOnceUseCase(rooms), get, move, sessions, codec),
                 new PlayerProfileApiHandler(new PlayerProfileUseCases(playerClient, playerClient, playerClient), sessions, codec),
                 new BrowserAccountApiHandler(access, sessions));
         game.start();
@@ -284,6 +284,23 @@ class AccountPermissionsHttpTest {
         var unavailableBootstrap = send(other, "/api/session", "GET", null);
         assertEquals(503, unavailableBootstrap.statusCode());
         assertTrue(unavailableBootstrap.headers().allValues("Set-Cookie").isEmpty());
+    }
+
+    @Test void keyedCreationUsesTheAccountIdentityAndExpiredAccountsCannotRetryIt() throws Exception {
+        register(alice, "alice");
+        var signedIn = login(alice, "alice");
+        var request = Map.of("token", token(signedIn), "name", "Recorded Alice", "operationKey", "account-key",
+                "code", "KEY001", "playerId", "forged-player", "gameId", "forged-game");
+        var first = request(alice, "/games", "POST", request);
+        assertEquals(201, first.statusCode());
+        var saved = rooms.findByCode("KEY001").orElseThrow();
+        assertEquals(signedIn.getAsJsonObject("viewer").get("id").getAsString(), saved.white().id());
+        var anotherBrowser = login(other, "alice");
+        assertEquals(201, request(other, "/games", "POST", Map.of("token", token(anotherBrowser), "name", "Recorded Alice",
+                "operationKey", "account-key", "code", "KEY001")).statusCode());
+        time.addAndGet(Duration.ofMinutes(30).toMillis());
+        assertEquals(401, request(alice, "/games", "POST", request).statusCode());
+        assertEquals(saved, rooms.findByCode("KEY001").orElseThrow());
     }
 
     private String createAndJoin(JsonObject aliceState) throws Exception {
